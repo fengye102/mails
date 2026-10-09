@@ -26,21 +26,23 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 | `users` | `id`、`username`、`password_hash`、`role`、`created_at` | A1 仅创建 `owner`；口令采用 Argon2id；用户名唯一。 |
 | `provider_connections` | `id`、`kind`、`name`、`base_url`、`encrypted_secret`、`status`、`last_error`、`last_checked_at` | A1 的 `kind` 仅 `outlook_plus`；密钥不进入普通 API 响应。 |
 | `mailboxes` | `id`、`connection_id`、`provider_mailbox_key`、`address`、`display_name`、`sync_state`、`last_synced_at` | 同一连接下上游邮箱键唯一；A1 由管理员显式登记地址。 |
-| `messages` | `id`、`mailbox_id`、`provider_message_key`、`sender`、`recipient`、`subject`、`snippet`、`received_at`、`body_text`、`verification_code`、`created_at` | 同一邮箱下上游消息键唯一，重复同步执行 upsert；A1 仅存纯文本正文，不渲染上游 HTML。 |
+| `messages` | `id`、`mailbox_id`、`provider_message_key`、`rfc_message_id`、`sender`、`recipient`、`subject`、`snippet`、`received_at`、`body_text`、`verification_code`、`created_at` | 同一邮箱下上游消息键唯一，重复同步执行 upsert；A1 仅存纯文本正文，不渲染上游 HTML。`rfc_message_id` 仅作为后续跨读取方式核对线索，不在 A1 中作为唯一键。 |
 | `sync_runs` | `id`、`connection_id`、`started_at`、`finished_at`、`status`、`error_code`、`error_summary`、`new_message_count` | 记录每次手动/定时同步结果，不记录凭据或完整邮件正文。 |
 
-所有时间以 UTC 存储。`provider_message_key` 必须作为不透明字符串处理，不根据其格式推断顺序。消息列表按 `received_at DESC, id DESC` 排序。邮箱地址用于展示和查询，但内部关联只用 ID，避免别名更名导致索引错配。
+所有时间以 UTC 存储。`provider_message_key` 由上游读取方式 `method` 与上游 `id` 共同构成，避免 Graph ID 与 IMAP UID 碰撞；核心把它作为不透明字符串处理，不根据其格式推断顺序。消息列表按 `received_at DESC, id DESC` 排序。邮箱地址用于展示和查询，但内部关联只用 ID，避免别名更名导致索引错配。
 
 ## 4. 上游契约与数据流
 
 1. 管理员在 OutlookEmailPlus 内完成 Outlook 或 IMAP 邮箱授权，并创建只读范围的外部 API Key。
 2. 管理员在本项目登记上游 `base_url`、API Key 和待纳入统一后台的邮箱地址。API 首先用 `/api/external/health` 探测服务，再用 `/api/external/account-status` 验证每个地址可读；失败时不激活连接或邮箱。
-3. 手动同步和定时同步使用 `GET /api/external/messages` 按邮箱读取摘要，再使用 `GET /api/external/messages/{message_id}` 获取正文。适配器最多接收每邮箱最近 100 封并在本地按时间过滤；具体查询参数、上游数量上限和响应字段在 A1 实施的第一项契约测试中固定，不以文档示例代替真实测试。
-4. 适配器把上游数据变为内部 `NormalizedMessage`：稳定上游 ID、邮箱 ID、发件人、收件人、主题、UTC 收件时间、纯文本正文和摘要。无稳定上游 ID 的响应作为适配器错误，不通过正文哈希猜测身份。
+3. 手动同步和定时同步使用 `GET /api/external/messages?email=...&folder=inbox&skip=...&top=50` 按邮箱读取摘要；最多读取两页、100 封，不依赖当前实现恒为 `false` 的 `has_more`。只对尚未索引的消息使用 `GET /api/external/messages/{message_id}?email=...&folder=inbox` 获取正文。两种接口均检查上游的 `{success, code, data}` 包装层，不能仅凭 HTTP 200 判断成功。
+4. 适配器把上游数据变为内部 `NormalizedMessage`：读取方式与上游 ID、邮箱 ID、发件人、收件人、主题、UTC 收件时间、纯文本正文和摘要。无上游 ID 的响应作为适配器错误，不通过正文哈希猜测身份。从上游 `raw_content` 解析到有效 `Message-ID` 时记录 `rfc_message_id`，否则留空。上游从 Graph 回退到 IMAP 时，同一封实体邮件可能获得新 ID；跨方式自动合并在 A4 完成，以免在证据不足时错误合并不同邮件。
 5. 核心从纯文本正文和主题中用确定性规则提取 4–8 位数字验证码；有多个候选且无法明确判定时返回空值，不猜测。提取结果写入 `messages.verification_code`，可由用户在界面复制。
 6. 每次同步在单个邮箱粒度提交；单封邮件解析失败记录错误并继续处理后续邮件，单个邮箱失败不阻断其他邮箱。同步记录准确反映部分成功与失败。
 
-为避免无限制拉取，A1 每个邮箱首次同步只保存最近 7 天、最多 100 封；之后每次读取最近 100 封并依靠上游消息 ID 去重。管理员可手动重试。历史补全和自定义保留期归入 A4。
+为避免无限制拉取，A1 每个邮箱首次同步只保存最近 7 天、最多 100 封；之后每次读取最近 100 封并依靠读取方式与上游消息 ID 去重。重复同步不重复拉取已索引邮件的正文。管理员可手动重试。历史补全和自定义保留期归入 A4。
+
+上游契约依据固定提交的[接口文档](https://github.com/ZeroPointSix/outlookEmailPlus/blob/ea531a1f40e7badd0769a46f906213f02bab7c82/%E6%B3%A8%E5%86%8C%E4%B8%8E%E9%82%AE%E7%AE%B1%E6%B1%A0%E6%8E%A5%E5%8F%A3%E6%96%87%E6%A1%A3.md)、[列表与详情实现](https://github.com/ZeroPointSix/outlookEmailPlus/blob/ea531a1f40e7badd0769a46f906213f02bab7c82/outlook_web/controllers/emails.py)及[读取服务实现](https://github.com/ZeroPointSix/outlookEmailPlus/blob/ea531a1f40e7badd0769a46f906213f02bab7c82/outlook_web/services/external_api.py)。运行时行为仍须用契约测试验证。
 
 ## 5. 本项目 API 与界面
 
@@ -72,7 +74,7 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 
 1. 首次管理员由 CLI 创建后可登录；匿名请求无法查看邮箱或消息。
 2. 登记一个上游连接和两个邮箱；健康探测与地址可读性校验通过后显示为可同步。
-3. 一封新邮件同步后只出现一次；连续执行同一同步，邮件数不变。
+3. 同一上游读取方式下，一封新邮件同步后只出现一次；连续执行同一同步，邮件数不变。Graph/IMAP 方式切换导致的新 ID 记录在 A4 处理，不把 A1 的去重范围表述成全局保证。
 4. 包含单个明确 6 位验证码的邮件能显示并复制；包含多个无明确上下文数字的邮件不输出猜测值。
 5. 能按邮箱、发件人、主题和时间过滤并阅读纯文本正文；HTML 内容不会执行。
 6. 上游超时、401/403、响应字段缺失分别产生明确状态；一个邮箱失败不影响另一邮箱的已有邮件与同步。

@@ -21,7 +21,7 @@
 | `tests/integration/` | 跨 API、数据库和来源模拟服务的集成测试。 |
 | `infra/` | Docker Compose、容器构建和部署配置模板。 |
 | `scripts/` | 可重复执行的开发、检查和清理脚本；Windows 使用 PowerShell。 |
-| `docs/superpowers/specs/` | 经确认的设计规格，按 `YYYY-MM-DD-topic-design.md` 命名。 |
+| `docs/superpowers/specs/` | 设计规格，文件内标注待确认或已确认状态，按 `YYYY-MM-DD-topic-design.md` 命名。 |
 | `docs/superpowers/plans/` | 与规格一一对应的实施计划，按 `YYYY-MM-DD-topic.md` 命名。 |
 | `docs/decisions/` | 架构决策记录，按 `NNNN-topic.md` 命名。 |
 | `docs/runbooks/` | 部署、备份、恢复与故障处理步骤。 |
