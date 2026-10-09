@@ -21,15 +21,15 @@
 ## CYMail 契约
 
 - 认证：`X-API-Key: <secret>`（也兼容 Bearer，但核心固定使用 X-API-Key）。
+- 探测：`GET /api/accounts`；邮箱登记验证：`GET /api/aliases?account_id=<account_id>`，要求别名列表中存在匹配且启用的地址。
 - 列表：`GET /api/inbox?account_id=<account_id>&alias=<address>&limit=100&days=7`。
-- 响应：`{"success":true,"data":{"messages":[{"id","from","to","subject","date","preview","body"?}],"method":"imap|web_api"}}`。
-- 列表中的 `body` 存在时直接使用；否则详情端点无单封读取契约，适配器将 `preview` 作为纯文本正文并标记为摘要，避免猜测或调用管理端 Cookie 接口。
+- 响应：`{"success":true,"data":{"messages":[{"id","from","to","subject","date","preview"}],"method":"imap|web_api"}}`。固定版本 API 文档和响应结构没有单封详情接口，也没有 `body` 字段；适配器只能将纯文本 `preview` 作为摘要正文，明确视为不完整内容，不读取其内部 HTML 字段或调用管理端 Cookie 接口。
 - `account_id` 在连接配置中保存，邮箱地址在统一核心的 mailbox 记录中保存。
 - 认证、HTTP 5xx/超时和 `success:false` 映射为固定 ProviderError；不回传上游 `message` 字段。
 
 ## 连接配置
 
-A2/A3 仍复用 `provider_connections`，但 `kind` 扩展为 `cloudflare_temp_email`、`cymail`；连接 `name`、`base_url`、加密 secret 不变。来源专有字段暂不增加数据库列：Cloudflare 无额外字段，CYMail 的 `account_id` 作为邮箱登记时的 `provider_mailbox_key` 前缀格式 `account_id\x00address` 存储，并单独在 mailbox `address` 保存可展示地址。
+A2/A3 仍复用 `provider_connections`，但 `kind` 扩展为 `cloudflare_temp_email`、`cymail`；连接 `name`、`base_url`、加密 secret 不变。来源专有字段暂不增加数据库列：Cloudflare 无额外字段，CYMail 的 `account_id` 与邮箱地址分别做无填充 Base64URL 编码后以 `cymail:<account>:<address>` 存入 `provider_mailbox_key`（PostgreSQL `text` 禁止 NUL 字节），mailbox `address` 仍单独保存可展示地址。
 
 ## 验收
 
@@ -37,4 +37,4 @@ A2/A3 仍复用 `provider_connections`，但 `kind` 扩展为 `cloudflare_temp_e
 - 一个来源超时或契约错误时，其他来源同步仍可成功。
 - 相同来源重复同步不重复落库；不同来源相同数字 ID 不碰撞。
 - Cloudflare 原始 MIME 只在适配器内解析为纯文本；CYMail 的响应正文按纯文本处理。
-- 适配器测试覆盖认证头、分页、坏响应、时间解析、HTML 不执行、详情缺失降级和固定错误码。
+- 适配器测试覆盖认证头、最多 100 封读取边界、坏响应、时间解析、HTML 不执行、仅摘要正文的降级和固定错误码。
