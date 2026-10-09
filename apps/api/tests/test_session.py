@@ -36,7 +36,9 @@ def client(engine, owner):
 
 def login(client):
     return client.post(
-        "/api/v1/session", json={"username": "owner", "password": "secret"}
+        "/api/v1/session",
+        headers={"Origin": str(client.base_url).rstrip("/")},
+        json={"username": "owner", "password": "secret"},
     )
 
 
@@ -78,7 +80,9 @@ def test_session_token_is_hashed_and_csrf_independent(engine, owner):
 )
 def test_wrong_credentials_do_not_create_session(client, engine, username, password):
     response = client.post(
-        "/api/v1/session", json={"username": username, "password": password}
+        "/api/v1/session",
+        headers={"Origin": "http://testserver"},
+        json={"username": username, "password": password},
     )
     assert response.status_code == 401
     assert not client.cookies

@@ -1,12 +1,12 @@
 """Owner login, session inspection, and server-side logout."""
 
-import secrets
 from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from mails_api.db import get_db
 from mails_api.models import Session, User, utc_now
+from mails_api.security.csrf import require_csrf, require_login_origin
 from mails_api.security.passwords import verify_password
 from mails_api.security.sessions import COOKIE_NAME, create_session, get_current_session
 from pydantic import BaseModel
@@ -38,11 +38,19 @@ def login(
     response: Response,
     db: Annotated[DbSession, Depends(get_db)],
 ) -> dict:
+    require_login_origin(request)
+    peer_ip = request.client.host if request.client is not None else ""
+    limiter = request.app.state.login_limiter
+    now = utc_now()
+    if limiter.is_limited(credentials.username, peer_ip, now):
+        raise HTTPException(status_code=429, detail="LOGIN_RATE_LIMITED")
     user = db.scalar(select(User).where(User.username == credentials.username))
     if user is None or not verify_password(user.password_hash, credentials.password):
+        limiter.record_failure(credentials.username, peer_ip, now)
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token, session = create_session(db, user, utc_now())
+    token, session = create_session(db, user, now)
     db.commit()
+    limiter.reset(credentials.username, peer_ip)
     response.set_cookie(
         COOKIE_NAME,
         token,
@@ -71,9 +79,7 @@ def logout(
     session: Annotated[Session, Depends(get_current_session)],
     db: Annotated[DbSession, Depends(get_db)],
 ) -> Response:
-    supplied_csrf = request.headers.get("X-CSRF-Token", "")
-    if not secrets.compare_digest(supplied_csrf.encode(), session.csrf_token.encode()):
-        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+    require_csrf(request, session)
     session.revoked_at = utc_now()
     db.commit()
     response = Response(status_code=204, headers={"Cache-Control": "no-store"})
