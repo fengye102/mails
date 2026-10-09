@@ -16,7 +16,7 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 - API：Python 3.12+、FastAPI、Pydantic 2、SQLAlchemy 2、Alembic、PostgreSQL 16+、`httpx`。A1 固定运行一个 API worker，由该进程执行周期同步；不引入消息队列或多副本调度。
 - Web：Node.js 22+、React、TypeScript、Vite。通过本项目 API 访问数据，不直接请求上游邮箱服务。
 - 部署：Linux Docker Compose 启动 PostgreSQL、API、Web/反向代理；本机 Windows 使用 PowerShell 脚本和 Docker Compose 开发。生产入口只开放 HTTPS，API 和数据库不直连公网。
-- 配置：`MAILS_DATABASE_URL`、`MAILS_ENCRYPTION_KEY`、`MAILS_SESSION_SECRET` 等保存在部署环境；仓库只提供 `.env.example`。上游 API Key 通过后台写入数据库并以 AES-256-GCM 加密。
+- 配置：`MAILS_DATABASE_URL`、`MAILS_ENCRYPTION_KEY` 等保存在部署环境；仓库只提供 `.env.example`。上游 API Key 通过后台写入数据库并以 AES-256-GCM 加密。会话采用数据库服务端状态，不使用长期有效的自包含登录令牌。
 - 初始化：首次管理员只能通过本机 CLI 命令创建；不存在公开的“首次设置管理员”接口。
 
 ## 3. 模型与职责
@@ -24,6 +24,7 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 | 实体 | 必要字段 | 约束 |
 | --- | --- | --- |
 | `users` | `id`、`username`、`password_hash`、`role`、`created_at` | A1 仅创建 `owner`；口令采用 Argon2id；用户名唯一。 |
+| `sessions` | `id`、`user_id`、`token_hash`、`csrf_token`、`created_at`、`last_seen_at`、`expires_at`、`revoked_at` | 随机 32 字节会话令牌只进 Cookie，数据库只存其 SHA-256 摘要；独立随机 CSRF Token 存在服务端并通过会话查询返回。登出立即吊销；空闲 30 分钟或绝对 8 小时到期，由服务端判定。 |
 | `provider_connections` | `id`、`kind`、`name`、`base_url`、`encrypted_secret`、`status`、`last_error`、`last_checked_at` | A1 的 `kind` 仅 `outlook_plus`；密钥不进入普通 API 响应。 |
 | `mailboxes` | `id`、`connection_id`、`provider_mailbox_key`、`address`、`display_name`、`sync_state`、`last_synced_at` | 同一连接下上游邮箱键唯一；A1 由管理员显式登记地址。 |
 | `messages` | `id`、`mailbox_id`、`provider_message_key`、`rfc_message_id`、`sender`、`recipient`、`subject`、`snippet`、`received_at`、`body_text`、`verification_code`、`created_at` | 同一邮箱下上游消息键唯一，重复同步执行 upsert；A1 仅存纯文本正文，不渲染上游 HTML。`rfc_message_id` 仅作为后续跨读取方式核对线索，不在 A1 中作为唯一键。 |
@@ -50,19 +51,20 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 
 | 路径 | 用途 |
 | --- | --- |
-| `POST /api/v1/session`、`DELETE /api/v1/session`、`GET /api/v1/session` | 登录、退出、读取当前用户；HttpOnly、SameSite=Lax Cookie，生产 HTTPS 设置 Secure，本地 HTTP 开发环境不设置 Secure。 |
+| `POST /api/v1/session`、`DELETE /api/v1/session`、`GET /api/v1/session` | 登录、退出、读取当前用户及其 CSRF Token；HttpOnly、SameSite=Lax Cookie，生产 HTTPS 设置 Secure，本地 HTTP 开发环境不设置 Secure。 |
 | `POST /api/v1/connections`、`GET /api/v1/connections` | 新增和列出上游连接；不回显 API Key。 |
 | `POST /api/v1/connections/{id}/mailboxes`、`GET /api/v1/mailboxes` | 登记并列出可读邮箱。 |
 | `POST /api/v1/mailboxes/{id}/sync`、`GET /api/v1/sync-runs` | 手动同步和查看结果。 |
 | `GET /api/v1/messages`、`GET /api/v1/messages/{id}` | 按邮箱、发件人、主题和时间检索；读取纯文本正文及验证码。 |
 
-所有写入接口要求有效会话和同源 CSRF 防护。未登录返回 401；上游鉴权失败记录 `UPSTREAM_AUTH`，超时记录 `UPSTREAM_TIMEOUT`，响应契约不匹配记录 `UPSTREAM_CONTRACT`，而非把上游错误文本原样展示给用户。
+除登录外，所有写入接口要求有效会话和 `X-CSRF-Token`，服务端与当前会话的 Token 恒时比较。前端仅在内存持有 CSRF Token，页面刷新后经 `GET /api/v1/session` 重新读取；不放在 URL、Cookie 或持久 Web Storage。会话响应禁止缓存。登录请求也校验 `Origin` 或 `Referer` 与部署 origin 精确一致。未登录返回 401；上游鉴权失败记录 `UPSTREAM_AUTH`，超时记录 `UPSTREAM_TIMEOUT`，响应契约不匹配记录 `UPSTREAM_CONTRACT`，而非把上游错误文本原样展示给用户。
 
 前端只有四个主要页面：登录、来源连接、邮箱列表、统一收件箱。收件箱默认显示最近邮件，可按邮箱、发件人、主题和时间过滤；详情以纯文本展示；验证码仅在确定提取成功时显示复制按钮。连接和邮箱展示最近同步时间、状态与可读的错误摘要。
 
 ## 6. 安全、错误与运行
 
 - API Key 和加密主密钥不出现在 URL、页面响应、日志或错误摘要中；主密钥丢失时只能从备份恢复，不提供明文导出。
+- 会话令牌不进入数据库明文或浏览器脚本；退出登录必须撤销服务端会话，不能只删除 Cookie。反向代理按真实直连来源对登录请求限速，API 不采信未经配置的转发 IP 头。
 - 所有上游 HTTP 请求有连接超时和总超时；仅对超时和 5xx 作有限重试，401/403 与契约错误不自动重试。
 - 上游目标采用部署配置中的显式 `MAILS_UPSTREAM_ORIGINS` 白名单：管理员填写的 `base_url` 必须与其中一个 origin 完全匹配。生产 origin 必须是 HTTPS；本机开发才可将 HTTP 本地 origin 列入白名单。适配器不跟随跨 origin 重定向，防止任意服务端请求。
 - 同步任务同一邮箱不能并发执行；请求重复触发时返回当前运行状态，不排队叠加。
@@ -73,6 +75,7 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 在模拟上游和真实 OutlookEmailPlus 测试实例上验收：
 
 1. 首次管理员由 CLI 创建后可登录；匿名请求无法查看邮箱或消息。
+   登录后会话在服务端到期或登出时立即失效；缺少或错误的 CSRF Token 不能修改连接和邮箱。
 2. 登记一个上游连接和两个邮箱；健康探测与地址可读性校验通过后显示为可同步。
 3. 同一上游读取方式下，一封新邮件同步后只出现一次；连续执行同一同步，邮件数不变。Graph/IMAP 方式切换导致的新 ID 记录在 A4 处理，不把 A1 的去重范围表述成全局保证。
 4. 包含单个明确 6 位验证码的邮件能显示并复制；包含多个无明确上下文数字的邮件不输出猜测值。
@@ -84,3 +87,5 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 ## 8. 后续兼容边界
 
 A2 的 Cloudflare 和 A3 的 CYMail 适配器复用 `NormalizedMessage` 与同步流程，但各自实现鉴权、邮箱发现和分页。A1 不创建通用插件加载器；适配器以代码模块和显式工厂注册，避免在只有一个来源时引入动态插件系统。A4 再补团队成员权限、跨来源性能与运维完善。B 的公开用户和 C 的取件客户均不复用 A1 的管理会话。
+
+会话与 CSRF 的设计参考 [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) 和 [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)。
