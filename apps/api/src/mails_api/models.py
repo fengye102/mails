@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     LargeBinary,
     String,
     Text,
@@ -66,6 +67,7 @@ class ProviderConnection(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     encrypted_secret: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

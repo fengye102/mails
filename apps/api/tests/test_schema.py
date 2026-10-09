@@ -22,7 +22,7 @@ def test_schema_has_required_fields_and_constraints():
     required = {
         "users": "id username password_hash role created_at",
         "sessions": "id user_id token_hash csrf_token created_at last_seen_at expires_at revoked_at",
-        "provider_connections": "id kind name base_url encrypted_secret status last_error last_checked_at",
+        "provider_connections": "id kind name base_url encrypted_secret config_json status last_error last_checked_at",
         "mailboxes": "id connection_id provider_mailbox_key address display_name sync_state last_synced_at",
         "messages": "id mailbox_id provider_message_key rfc_message_id sender recipient subject snippet received_at body_text verification_code created_at",
         "sync_runs": "id connection_id mailbox_id started_at finished_at status error_code error_summary new_message_count",

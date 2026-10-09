@@ -170,10 +170,11 @@ class CloudflareTempEmailAdapter:
 
     async def check_mailbox(
         self, base_url: str, secret: str, address: str, config: dict | None = None
-    ) -> None:
+    ) -> str:
         result = await self.list_messages(base_url, secret, address, config)
         if result.issues and not result.summaries:
             raise _contract_error()
+        return address
 
     @staticmethod
     def _parse_summary(item: dict) -> MessageSummary:

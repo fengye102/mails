@@ -100,7 +100,7 @@ class OutlookPlusAdapter:
             return payload["data"]
         raise _contract_error()  # All request outcomes return or raise above.
 
-    async def probe(self, base_url: str, api_key: str) -> None:
+    async def probe(self, base_url: str, api_key: str, config: dict | None = None) -> None:
         health = await self._get_data(base_url, api_key, "/api/external/health")
         status = _text(health, "status", required=True)
         database = _text(health, "database", required=True)
@@ -115,7 +115,7 @@ class OutlookPlusAdapter:
         ):
             raise _contract_error()
 
-    async def check_mailbox(self, base_url: str, api_key: str, email: str) -> None:
+    async def check_mailbox(self, base_url: str, api_key: str, email: str, config: dict | None = None) -> str | None:
         data = await self._get_data(
             base_url, api_key, "/api/external/account-status", params={"email": email}
         )
@@ -147,7 +147,7 @@ class OutlookPlusAdapter:
         )
 
     async def list_messages(
-        self, base_url: str, api_key: str, email: str
+        self, base_url: str, api_key: str, email: str, config: dict | None = None
     ) -> MessageListResult:
         summaries = []
         issues = []
@@ -173,7 +173,12 @@ class OutlookPlusAdapter:
         return MessageListResult(summaries=summaries[:100], issues=issues)
 
     async def get_message(
-        self, base_url: str, api_key: str, email: str, summary: MessageSummary
+        self,
+        base_url: str,
+        api_key: str,
+        email: str,
+        summary: MessageSummary,
+        config: dict | None = None,
     ) -> NormalizedMessage:
         data = await self._get_data(
             base_url,

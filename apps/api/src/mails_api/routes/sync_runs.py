@@ -6,12 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mails_api.db import get_db
 from mails_api.models import Mailbox, ProviderConnection, SyncRun, utc_now
-from mails_api.providers.outlook_plus import OutlookPlusAdapter
 from mails_api.routes.connections import (
     allowed_origin,
     checked_time,
     encryption_key,
-    get_adapter,
+    get_http_client,
 )
 from mails_api.security.csrf import require_csrf, require_owner
 from mails_api.services.sync import sync_mailbox
@@ -40,13 +39,15 @@ async def trigger_sync(
     mailbox_id: UUID,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    adapter: Annotated[OutlookPlusAdapter, Depends(get_adapter)],
+    client: Annotated[object, Depends(get_http_client)],
 ) -> dict:
     mailbox = db.get(Mailbox, mailbox_id)
     if mailbox is None:
         raise HTTPException(status_code=404, detail="MAILBOX_NOT_FOUND")
     connection = db.get(ProviderConnection, mailbox.connection_id)
     allowed_origin(connection.base_url, request)
+    from mails_api.routes.connections import get_adapter_for
+    adapter = get_adapter_for(connection.kind, client)
     run = await sync_mailbox(
         db, mailbox_id, adapter, utc_now(), encryption_key=encryption_key(request)
     )

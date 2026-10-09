@@ -201,12 +201,14 @@ class CYMailAdapter:
     def _cache_key(self, base_url: str, api_key: str, mailbox: str) -> tuple[str, str, str]:
         return base_url.rstrip("/"), api_key, mailbox
 
-    async def probe(self, base_url: str, api_key: str) -> None:
+    async def probe(self, base_url: str, api_key: str, config: dict | None = None) -> None:
         data = await self._get_data(base_url, api_key, "/api/accounts")
         if not isinstance(data, list):
             raise _contract_error()
 
-    async def check_mailbox(self, base_url: str, api_key: str, mailbox: str) -> None:
+    async def check_mailbox(
+        self, base_url: str, api_key: str, mailbox: str, config: dict | None = None
+    ) -> str:
         account_id, address = _split_key(mailbox)
         data = await self._get_data(
             base_url,
@@ -228,11 +230,11 @@ class CYMailAdapter:
             if alias_email.strip().lower() == address:
                 if item.get("active") is not True:
                     raise _contract_error()
-                return
+                return mailbox
         raise _contract_error()
 
     async def list_messages(
-        self, base_url: str, api_key: str, mailbox: str
+        self, base_url: str, api_key: str, mailbox: str, config: dict | None = None
     ) -> MessageListResult:
         account_id, address = _split_key(mailbox)
         data = await self._get_data(
@@ -263,6 +265,7 @@ class CYMailAdapter:
         api_key: str,
         mailbox: str,
         summary: MessageSummary,
+        config: dict | None = None,
     ) -> NormalizedMessage:
         _account_id, address = _split_key(mailbox)
         cache_key = self._cache_key(base_url, api_key, mailbox)

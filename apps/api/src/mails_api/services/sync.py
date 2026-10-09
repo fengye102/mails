@@ -1,6 +1,7 @@
 """Single-worker, per-engine/per-mailbox non-queuing synchronization."""
 
 import asyncio
+import inspect
 import logging
 from datetime import timedelta, timezone
 from weakref import WeakKeyDictionary
@@ -9,7 +10,7 @@ import httpx
 from cryptography.exceptions import InvalidTag
 from mails_api.models import Mailbox, Message, ProviderConnection, SyncRun, utc_now
 from mails_api.providers.base import ProviderError
-from mails_api.providers.outlook_plus import OutlookPlusAdapter
+from mails_api.providers.base import MailProvider
 from mails_api.security.crypto import decrypt_secret
 from mails_api.services.extract import extract_code
 from sqlalchemy import select
@@ -32,6 +33,20 @@ _SAFE_ERRORS.update(
         "CONNECTION_SECRET_INVALID": "Connection secret is unavailable.",
     }
 )
+
+
+async def _list_messages(adapter, base_url, secret, address, config):
+    method = adapter.list_messages
+    if "config" in inspect.signature(method).parameters:
+        return await method(base_url, secret, address, config)
+    return await method(base_url, secret, address)
+
+
+async def _get_message(adapter, base_url, secret, address, summary, config):
+    method = adapter.get_message
+    if "config" in inspect.signature(method).parameters:
+        return await method(base_url, secret, address, summary, config)
+    return await method(base_url, secret, address, summary)
 
 
 def _safe_code(exc):
@@ -68,8 +83,14 @@ async def sync_mailbox(
     connection = db.get(ProviderConnection, mailbox.connection_id)
     # Cache scalar values before commit expires ORM instances. No connection
     # may be held while waiting for upstream I/O.
-    base_url, address = connection.base_url, mailbox.address
+    base_url = connection.base_url
+    address = (
+        mailbox.provider_mailbox_key
+        if connection.kind == "cymail"
+        else mailbox.address
+    )
     connection_status, encrypted_secret = connection.status, connection.encrypted_secret
+    provider_config = connection.config_json or {}
     first_sync = mailbox.last_synced_at is None
     messages = []
     lock = asyncio.Lock()
@@ -92,7 +113,7 @@ async def sync_mailbox(
                 raise ProviderError("UPSTREAM_UNAVAILABLE")
             try:
                 if encryption_key is None:
-                    if isinstance(adapter, OutlookPlusAdapter):
+                    if adapter.__class__.__module__.startswith("mails_api.providers."):
                         raise ValueError
                     secret = ""
                 else:
@@ -100,7 +121,7 @@ async def sync_mailbox(
             except (ValueError, TypeError, InvalidTag, UnicodeError):
                 _record_error(run, "CONNECTION_SECRET_INVALID")
                 raise ProviderError("UPSTREAM_UNAVAILABLE") from None
-            result = await adapter.list_messages(base_url, secret, address)
+            result = await _list_messages(adapter, base_url, secret, address, provider_config)
             for issue in result.issues:
                 _record_error(run, issue.code)
             summaries = result.summaries[:100]
@@ -124,8 +145,8 @@ async def sync_mailbox(
                 ):
                     continue
                 try:
-                    detail = await adapter.get_message(
-                        base_url, secret, address, summary
+                    detail = await _get_message(
+                        adapter, base_url, secret, address, summary, provider_config
                     )
                     if detail.provider_message_key != key:
                         raise ProviderError("UPSTREAM_CONTRACT")
@@ -197,7 +218,7 @@ async def sync_mailbox(
 
 async def sync_all_mailboxes(app):
     """Independent sessions/tasks ensure a slow mailbox cannot block its peers."""
-    from mails_api.routes.connections import allowed_origin
+    from mails_api.routes.connections import allowed_origin, get_adapter_for
     from mails_api.security.crypto import decode_key
     from sqlalchemy.orm import Session
     from starlette.requests import Request
@@ -217,8 +238,9 @@ async def sync_all_mailboxes(app):
             mailbox = db.get(Mailbox, mailbox_id)
             connection = db.get(ProviderConnection, mailbox.connection_id)
             allowed_origin(connection.base_url, Request({"type": "http", "app": app}))
+            selected = get_adapter_for(connection.kind, adapter)
             return await sync_mailbox(
-                db, mailbox_id, adapter, utc_now(), encryption_key=key
+                db, mailbox_id, selected, utc_now(), encryption_key=key
             )
 
     async def run(client):
@@ -228,7 +250,7 @@ async def sync_all_mailboxes(app):
         async def worker():
             for mailbox_id in pending:
                 try:
-                    await sync_one(mailbox_id, OutlookPlusAdapter(client))
+                    await sync_one(mailbox_id, client)
                 except Exception:  # noqa: BLE001 - isolate a mailbox's DB/config failure
                     logging.getLogger(__name__).warning(
                         "Mailbox synchronization failed."

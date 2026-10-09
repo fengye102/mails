@@ -2,18 +2,18 @@
 
 from datetime import datetime, timezone
 from ipaddress import ip_address
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mails_api.db import get_db
 from mails_api.models import ProviderConnection, utc_now
-from mails_api.providers.base import ProviderError
-from mails_api.providers.outlook_plus import OutlookPlusAdapter
+from mails_api.providers.base import MailProvider, ProviderError
+from mails_api.providers.factory import PROVIDER_KINDS, provider_for
 from mails_api.security.crypto import decode_key, encrypt_secret
 from mails_api.security.csrf import require_csrf, require_owner
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -21,10 +21,18 @@ router = APIRouter(prefix="/api/v1/connections", dependencies=[Depends(require_o
 
 
 class ConnectionInput(BaseModel):
-    kind: Literal["outlook_plus"]
+    kind: Literal["outlook_plus", "cloudflare_temp_email", "cymail"]
     name: str = Field(min_length=1, max_length=256)
     base_url: str = Field(min_length=1, max_length=2048)
     api_key: SecretStr = Field(min_length=1, max_length=8192)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(value) > 16 or any(not isinstance(k, str) or len(k) > 64 for k in value):
+            raise ValueError("Invalid provider config")
+        return value
 
 
 def canonical_origin(value: str) -> str:
@@ -87,13 +95,19 @@ def encryption_key(request: Request) -> bytes:
         ) from None
 
 
-async def get_adapter(request: Request):
+async def get_http_client(request: Request):
     client = request.app.state.upstream_client
     if client is not None:
-        yield OutlookPlusAdapter(client)
-    else:
-        async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client:
-            yield OutlookPlusAdapter(client)
+        yield client
+        return
+    async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client:
+        yield client
+
+
+def get_adapter_for(kind: str, client: httpx.AsyncClient) -> MailProvider:
+    if kind not in PROVIDER_KINDS:
+        raise HTTPException(status_code=422, detail="UNSUPPORTED_PROVIDER_KIND")
+    return provider_for(kind, client)
 
 
 def checked_time(value: datetime | None) -> str | None:
@@ -111,6 +125,7 @@ def connection_payload(connection: ProviderConnection) -> dict:
     return {
         "id": str(connection.id),
         "kind": connection.kind,
+        "config": {k: v for k, v in (connection.config_json or {}).items() if k != "secret"},
         "name": connection.name,
         "base_url": connection.base_url,
         "status": connection.status,
@@ -124,15 +139,16 @@ async def create_connection(
     body: ConnectionInput,
     request: Request,
     db: Annotated[DbSession, Depends(get_db)],
-    adapter: Annotated[OutlookPlusAdapter, Depends(get_adapter)],
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
 ) -> dict:
     origin = allowed_origin(body.base_url, request)
     key = encryption_key(request)
     secret = body.api_key.get_secret_value()
     if secret != secret.strip() or any(not 32 <= ord(c) <= 126 for c in secret):
         raise HTTPException(status_code=422, detail="API_KEY_INVALID")
+    adapter = get_adapter_for(body.kind, client)
     try:
-        await adapter.probe(origin, secret)
+        await adapter.probe(origin, secret, body.config)
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.code) from None
     connection = ProviderConnection(
@@ -140,6 +156,7 @@ async def create_connection(
         name=body.name,
         base_url=origin,
         encrypted_secret=encrypt_secret(key, secret),
+        config_json=body.config,
         status="active",
         last_checked_at=utc_now(),
     )
