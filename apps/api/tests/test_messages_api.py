@@ -73,6 +73,8 @@ def test_private_summaries_and_plain_text_detail(messages_client):
     assert set(item) == {
         "id",
         "mailbox_id",
+        "source_kind",
+        "identity_status",
         "sender",
         "recipient",
         "subject",
@@ -81,6 +83,8 @@ def test_private_summaries_and_plain_text_detail(messages_client):
         "verification_code",
     }
     assert item["received_at"] == "2026-10-09T12:00:00+00:00"
+    assert item["source_kind"] == "outlook_plus"
+    assert item["identity_status"] == "unverified"
     response = messages_client.get(f"/api/v1/messages/{item['id']}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
@@ -90,6 +94,8 @@ def test_private_summaries_and_plain_text_detail(messages_client):
         detail["body_text"] == 'Verification code: 123456\n<script>alert("x")</script>'
     )
     assert detail["verification_code"] == "123456"
+    assert detail["source_kind"] == "outlook_plus"
+    assert detail["identity_status"] == "unverified"
     assert (
         messages_client.get(f"/api/v1/messages/{UUID(int=2)}").json()[
             "verification_code"
@@ -139,6 +145,48 @@ def test_combined_mailbox_sender_subject_and_time_filter(messages_client):
     assert messages_client.get(
         "/api/v1/messages", params={"mailbox_id": str(uuid4())}
     ).json() == {"total": 0, "items": []}
+
+
+def test_query_source_kind_and_connection_filters(messages_client, engine):
+    with DbSession(engine) as db:
+        connection = db.scalar(select(ProviderConnection))
+        response_mail = db.get(Message, UUID(int=1))
+        response_mail.rfc_message_id = "<same@example.com>"
+        extra_mail = Message(
+            mailbox_id=response_mail.mailbox_id,
+            provider_message_key="imap:1",
+            rfc_message_id="<same@example.com>",
+            sender="other@example.com",
+            recipient="owner@example.com",
+            subject="different",
+            snippet="other body",
+            received_at=datetime(2026, 10, 9, 16, tzinfo=timezone.utc),
+            body_text="needle in body",
+        )
+        db.add(extra_mail)
+        extra_mail_id = extra_mail.id
+        db.commit()
+        connection_id = str(connection.id)
+
+    response = messages_client.get(
+        "/api/v1/messages",
+        params={
+            "query": "needle",
+            "source_kind": "outlook_plus",
+            "connection_id": connection_id,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["id"] == str(extra_mail_id)
+    assert payload["items"][0]["source_kind"] == "outlook_plus"
+
+
+def test_query_treats_sql_wildcards_as_literals(messages_client):
+    response = messages_client.get("/api/v1/messages", params={"query": "%"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
 
 
 @pytest.mark.parametrize("field", ["sender", "subject"])
