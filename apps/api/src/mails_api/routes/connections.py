@@ -13,7 +13,7 @@ from mails_api.providers.base import MailProvider, ProviderError
 from mails_api.providers.factory import PROVIDER_KINDS, provider_for
 from mails_api.security.crypto import decode_key, encrypt_secret
 from mails_api.security.csrf import require_csrf, require_owner
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -33,6 +33,22 @@ class ConnectionInput(BaseModel):
         if len(value) > 16 or any(not isinstance(k, str) or len(k) > 64 for k in value):
             raise ValueError("Invalid provider config")
         return value
+
+    @model_validator(mode="after")
+    def validate_provider_config(self):
+        if self.kind == "cymail":
+            account_id = self.config.get("account_id")
+            if (
+                not isinstance(account_id, str)
+                or not account_id.strip()
+                or len(account_id) > 256
+                or any(ord(char) < 32 for char in account_id)
+            ):
+                raise ValueError("CYMAIL_ACCOUNT_ID_REQUIRED")
+            self.config = {"account_id": account_id.strip()}
+        elif self.config:
+            raise ValueError("PROVIDER_CONFIG_UNSUPPORTED")
+        return self
 
 
 def canonical_origin(value: str) -> str:
@@ -122,10 +138,15 @@ def checked_time(value: datetime | None) -> str | None:
 
 
 def connection_payload(connection: ProviderConnection) -> dict:
+    config = {}
+    if connection.kind == "cymail":
+        account_id = (connection.config_json or {}).get("account_id")
+        if isinstance(account_id, str):
+            config = {"account_id": account_id}
     return {
         "id": str(connection.id),
         "kind": connection.kind,
-        "config": {k: v for k, v in (connection.config_json or {}).items() if k != "secret"},
+        "config": config,
         "name": connection.name,
         "base_url": connection.base_url,
         "status": connection.status,
