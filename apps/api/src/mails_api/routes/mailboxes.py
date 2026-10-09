@@ -9,12 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from mails_api.db import get_db
 from mails_api.models import Mailbox, ProviderConnection
 from mails_api.providers.base import ProviderError
-from mails_api.providers.outlook_plus import OutlookPlusAdapter
+from mails_api.providers.cymail import mailbox_key as cymail_mailbox_key
 from mails_api.routes.connections import (
     allowed_origin,
     checked_time,
     encryption_key,
-    get_adapter,
+    get_adapter_for,
+    get_http_client,
 )
 from mails_api.security.crypto import decrypt_secret
 from mails_api.security.csrf import require_csrf, require_owner
@@ -61,25 +62,34 @@ async def create_mailbox(
     body: MailboxInput,
     request: Request,
     db: Annotated[DbSession, Depends(get_db)],
-    adapter: Annotated[OutlookPlusAdapter, Depends(get_adapter)],
+    client: Annotated[object, Depends(get_http_client)],
 ) -> dict:
     connection = db.get(ProviderConnection, connection_id)
     if connection is None:
         raise HTTPException(status_code=404, detail="CONNECTION_NOT_FOUND")
     origin = allowed_origin(connection.base_url, request)
+    adapter = get_adapter_for(connection.kind, client)
     try:
         secret = decrypt_secret(encryption_key(request), connection.encrypted_secret)
     except (ValueError, InvalidTag, UnicodeError):
         raise HTTPException(
             status_code=503, detail="CONNECTION_SECRET_INVALID"
         ) from None
+    provider_address = body.address
+    if connection.kind == "cymail":
+        account_id = (connection.config_json or {}).get("account_id")
+        if not isinstance(account_id, str) or not account_id.strip():
+            raise HTTPException(status_code=422, detail="CYMAIL_ACCOUNT_ID_REQUIRED")
+        provider_address = cymail_mailbox_key(account_id, body.address)
     try:
-        await adapter.check_mailbox(origin, secret, body.address)
+        provider_key = await adapter.check_mailbox(
+            origin, secret, provider_address, connection.config_json or {}
+        )
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.code) from None
     mailbox = Mailbox(
         connection_id=connection_id,
-        provider_mailbox_key=body.address,
+        provider_mailbox_key=provider_key or provider_address,
         address=body.address,
         display_name=body.display_name,
         sync_state="idle",

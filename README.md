@@ -1,9 +1,11 @@
-# Mails — A1 私有统一邮箱后台
+# Mails — 三来源统一邮箱聚合后台
 
-统一核心 + 来源适配器；A1 接入已配置的 OutlookEmailPlus，支持连接、邮箱登记、同步、纯文本阅读及验证码提取。不提供上游授权、公开注册或发信。一个 API worker，PostgreSQL 16，Python 3.12，Node.js 22。
+统一核心 + 来源适配器；当前 A2/A3 已接入 OutlookEmailPlus、Cloudflare Temp Email、CYMail，支持连接、邮箱登记、跨来源同步、纯文本阅读及验证码提取。不复制上游 UI/数据库，不提供公开注册、发信或取件交付。一个 API worker，PostgreSQL 16，Python 3.12，Node.js 22。
 
 - [项目规则](Codex.md)
 - [已确认 A1 规格](docs/superpowers/specs/2026-10-09-phase-a1-private-hub-design.md)
+- [A2/A3 适配器规格](docs/superpowers/specs/2026-10-10-phase-a2-a3-adapters-design.md)
+- [来源接入决策](docs/decisions/0002-provider-adapter-integration.md)
 - [部署与验收](docs/runbooks/deploy.md)
 - [备份、恢复与轮换](docs/runbooks/backup-restore.md)
 
@@ -32,7 +34,7 @@ git diff --check
 $env:MAILS_DATABASE_URL = 'postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/mails_dev'
 $env:MAILS_ENCRYPTION_KEY = 'BASE64_32_RANDOM_BYTES'
 $env:MAILS_PUBLIC_ORIGIN = 'http://localhost:5173'
-$env:MAILS_UPSTREAM_ORIGINS = '["https://mail.example.com"]'
+$env:MAILS_UPSTREAM_ORIGINS = '["https://mail.example.com","https://cloudflare.example.com","https://cymail.example.com"]'
 Push-Location apps/api
 uv run alembic upgrade head
 uv run python -m mails_api.cli create-owner owner
@@ -51,4 +53,4 @@ docker compose --env-file .env -f infra/compose.yaml up -d --build
 docker compose --env-file .env -f infra/compose.yaml exec api python -m mails_api.cli create-owner owner
 ```
 
-唯一宿主端口是 TCP 443。详见运行手册的 TLS 前置条件、私网准入、备份及真实实例验收表。A1 尚不等于生产验收完成：当前 Windows 执行环境缺 Docker/PostgreSQL/真实上游实例，相关检查待部署主机执行。
+唯一宿主端口是 TCP 443。详见运行手册的 TLS 前置条件、私网准入、备份及真实实例验收表。A1/A2/A3 代码阶段尚不等于生产验收完成：当前 Windows 执行环境缺 Docker/PostgreSQL/真实上游实例，相关检查待部署主机执行。

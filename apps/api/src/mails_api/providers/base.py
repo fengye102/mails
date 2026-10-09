@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -49,3 +50,26 @@ class ProviderError(Exception):
             "UPSTREAM_CONTRACT": "Upstream response does not meet the read contract.",
         }[code]
         super().__init__(self.summary)
+
+
+class MailProvider(Protocol):
+    """Read-only provider contract consumed by the unified sync service."""
+
+    async def probe(self, base_url: str, secret: str, config: dict[str, Any] | None = None) -> None: ...
+
+    async def check_mailbox(
+        self, base_url: str, secret: str, address: str, config: dict[str, Any] | None = None
+    ) -> str | None: ...
+
+    async def list_messages(
+        self, base_url: str, secret: str, address: str, config: dict[str, Any] | None = None
+    ) -> MessageListResult: ...
+
+    async def get_message(
+        self,
+        base_url: str,
+        secret: str,
+        address: str,
+        summary: MessageSummary,
+        config: dict[str, Any] | None = None,
+    ) -> NormalizedMessage: ...
