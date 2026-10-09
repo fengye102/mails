@@ -11,6 +11,7 @@ from starlette.responses import JSONResponse
 
 from mails_api.routes.connections import router as connections_router
 from mails_api.routes.mailboxes import router as mailboxes_router
+from mails_api.routes.messages import router as messages_router
 from mails_api.routes.session import router as session_router
 from mails_api.routes.sync_runs import router as sync_runs_router
 from mails_api.security.login_limit import LoginLimiter
@@ -34,6 +35,7 @@ def create_app(
     app.include_router(session_router)
     app.include_router(connections_router)
     app.include_router(mailboxes_router)
+    app.include_router(messages_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
