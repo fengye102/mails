@@ -1,0 +1,63 @@
+"""Owner-only sync trigger and sanitized run history."""
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from mails_api.db import get_db
+from mails_api.models import Mailbox, ProviderConnection, SyncRun, utc_now
+from mails_api.providers.outlook_plus import OutlookPlusAdapter
+from mails_api.routes.connections import (
+    allowed_origin,
+    checked_time,
+    encryption_key,
+    get_adapter,
+)
+from mails_api.security.csrf import require_csrf, require_owner
+from mails_api.services.sync import sync_mailbox
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_owner)])
+
+
+def run_payload(run: SyncRun) -> dict:
+    return {
+        "id": str(run.id),
+        "connection_id": str(run.connection_id),
+        "mailbox_id": str(run.mailbox_id),
+        "started_at": checked_time(run.started_at),
+        "finished_at": checked_time(run.finished_at),
+        "status": run.status,
+        "error_code": run.error_code,
+        "error_summary": run.error_summary,
+        "new_message_count": run.new_message_count,
+    }
+
+
+@router.post("/mailboxes/{mailbox_id}/sync", dependencies=[Depends(require_csrf)])
+async def trigger_sync(
+    mailbox_id: UUID,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    adapter: Annotated[OutlookPlusAdapter, Depends(get_adapter)],
+) -> dict:
+    mailbox = db.get(Mailbox, mailbox_id)
+    if mailbox is None:
+        raise HTTPException(status_code=404, detail="MAILBOX_NOT_FOUND")
+    connection = db.get(ProviderConnection, mailbox.connection_id)
+    allowed_origin(connection.base_url, request)
+    run = await sync_mailbox(
+        db, mailbox_id, adapter, utc_now(), encryption_key=encryption_key(request)
+    )
+    return run_payload(run)
+
+
+@router.get("/sync-runs")
+def list_sync_runs(
+    db: Annotated[Session, Depends(get_db)], mailbox_id: UUID | None = None
+) -> list[dict]:
+    statement = select(SyncRun).order_by(SyncRun.started_at.desc(), SyncRun.id.desc())
+    if mailbox_id is not None:
+        statement = statement.where(SyncRun.mailbox_id == mailbox_id)
+    return [run_payload(run) for run in db.scalars(statement)]
