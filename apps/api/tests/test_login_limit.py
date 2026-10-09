@@ -54,3 +54,28 @@ def test_http_bucket_expires(security_client, monkeypatch):
     assert attempt(security_client).status_code == 429
     now += timedelta(minutes=15)
     assert attempt(security_client, password="secret").status_code == 200
+
+
+def test_out_of_order_failure_expires_behind_newer_failures():
+    from mails_api.security.login_limit import LoginLimiter
+
+    limiter = LoginLimiter()
+    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    for _ in range(4):
+        limiter.record_failure("owner", "peer", now + timedelta(minutes=1))
+    # The older request completes after the newer requests.
+    limiter.record_failure("owner", "peer", now)
+    assert limiter.is_limited("owner", "peer", now + timedelta(minutes=14))
+    assert not limiter.is_limited("owner", "peer", now + timedelta(minutes=15))
+
+
+def test_out_of_order_failure_does_not_evict_newer_failures():
+    from mails_api.security.login_limit import LoginLimiter
+
+    limiter = LoginLimiter()
+    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    for minute in range(1, 6):
+        limiter.record_failure("owner", "peer", now + timedelta(minutes=minute))
+    limiter.record_failure("owner", "peer", now)
+    assert limiter.is_limited("owner", "peer", now + timedelta(minutes=15))
+    assert not limiter.is_limited("owner", "peer", now + timedelta(minutes=16))

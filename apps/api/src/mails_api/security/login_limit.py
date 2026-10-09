@@ -22,7 +22,10 @@ class LoginLimiter:
         with self._lock:
             self._prune(now)
             key = (username.casefold(), peer_ip)
-            self._failures.setdefault(key, deque(maxlen=5)).append(now)
+            # Concurrent requests can complete out of timestamp order. Keep the
+            # newest five sorted so pruning never leaves expired entries behind.
+            timestamps = [*self._failures.get(key, ()), now]
+            self._failures[key] = deque(sorted(timestamps)[-5:], maxlen=5)
 
     def is_limited(self, username: str, peer_ip: str, now: datetime) -> bool:
         with self._lock:
