@@ -29,6 +29,10 @@ def api_client(monkeypatch):
         pytest.fail(
             "Refusing setup: PostgreSQL database name must begin with mails_test"
         )
+    # Fail closed: libpq/driver query options can override database/host/service.
+    # This disposable fixture accepts no URL query options, including benign ones.
+    if parsed.query:
+        pytest.fail("Refusing setup: TEST_DATABASE_URL query parameters are forbidden")
     engine = create_engine(url)
     root = Path(__file__).resolve().parents[2]
     migration = Config(str(root / "apps/api/alembic.ini"))
@@ -36,6 +40,17 @@ def api_client(monkeypatch):
     migration.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     # Require a fresh database; never drop an existing application's tables.
     try:
+        with engine.connect() as connection:
+            actual_database = connection.exec_driver_sql(
+                "SELECT current_database()"
+            ).scalar_one()
+        if (
+            not actual_database.startswith("mails_test")
+            or actual_database != parsed.database
+        ):
+            pytest.fail(
+                "Refusing setup: connected database is not the requested mails_test database"
+            )
         if inspect(engine).get_table_names():
             pytest.fail("Refusing setup: mails_test database must be empty")
         command.upgrade(migration, "head")
@@ -123,3 +138,8 @@ def session_headers(api_client):
         "Origin": "https://hub.example",
         "X-CSRF-Token": response.json()["csrf_token"],
     }
+
+
+@pytest.fixture
+def integration_namespace():
+    return globals()

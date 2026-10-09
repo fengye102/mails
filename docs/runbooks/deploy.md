@@ -49,3 +49,5 @@ docker compose --env-file .env -f infra/compose.yaml run --rm --no-deps --user r
 - 按备份手册在隔离环境恢复 DB+主密钥，验证解密和读取。
 
 上述 Docker/PG/真实实例/视觉/恢复检查在当前开发机均未验；不得用单元测试替代。已知终审分流：非 ASCII API Key 输入、RFC raw Message-ID 边界验证、会话恢复错误提示、阅读栏长主题；Task 9 不修改这些功能，终审决定阻断还是归入 A4。
+
+测试库保护补充：TEST_DATABASE_URL 禁止所有 URL query 参数（包括 dbname/service/host/options/connect_timeout），避免驱动参数覆盖连接目标；连接后先以 SELECT current_database() 验证真实库名匹配 URL 且以 mails_test 开头，再检查空库和执行迁移。使用不含查询参数的明确连接 URL。

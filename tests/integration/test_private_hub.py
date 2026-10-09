@@ -77,3 +77,60 @@ def test_refuses_non_disposable_database(monkeypatch, request, url):
     monkeypatch.setenv("TEST_DATABASE_URL", url)
     with pytest.raises(pytest.fail.Exception, match="Refusing setup"):
         request.getfixturevalue("api_client")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "dbname=production",
+        "database=production",
+        "service=production",
+        "host=other-host",
+        "port=5433",
+        "user=other-user",
+        "options=-csearch_path%3Dproduction",
+        "connect_timeout=10",
+    ],
+)
+def test_refuses_connection_query_overrides(
+    monkeypatch, request, integration_namespace, query
+):
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL", f"postgresql+psycopg://localhost/mails_test_a1?{query}"
+    )
+
+    def forbidden_engine(*args, **kwargs):
+        raise AssertionError("Engine creation must not occur for URL query parameters")
+
+    monkeypatch.setitem(integration_namespace, "create_engine", forbidden_engine)
+    with pytest.raises(pytest.fail.Exception, match="Refusing setup"):
+        request.getfixturevalue("api_client")
+
+
+@pytest.mark.parametrize("actual_database", ["production", "mails_test_other"])
+def test_refuses_actual_database_before_schema_access(
+    monkeypatch, request, integration_namespace, actual_database
+):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL", "postgresql+psycopg://localhost/mails_test_a1"
+    )
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.exec_driver_sql.return_value.scalar_one.return_value = actual_database
+    monkeypatch.setitem(integration_namespace, "create_engine", lambda url: engine)
+
+    def forbidden_schema(*args, **kwargs):
+        raise AssertionError(
+            "Schema inspection/migration must not run on wrong database"
+        )
+
+    monkeypatch.setitem(integration_namespace, "inspect", forbidden_schema)
+    monkeypatch.setattr(integration_namespace["command"], "upgrade", forbidden_schema)
+    monkeypatch.setattr(integration_namespace["command"], "downgrade", forbidden_schema)
+    with pytest.raises(pytest.fail.Exception, match="Refusing setup"):
+        request.getfixturevalue("api_client")
+    connection.exec_driver_sql.assert_called_once_with("SELECT current_database()")
+    engine.begin.assert_not_called()
+    engine.dispose.assert_called_once()
