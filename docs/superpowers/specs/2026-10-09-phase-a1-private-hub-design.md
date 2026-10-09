@@ -28,7 +28,7 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 | `provider_connections` | `id`、`kind`、`name`、`base_url`、`encrypted_secret`、`status`、`last_error`、`last_checked_at` | A1 的 `kind` 仅 `outlook_plus`；密钥不进入普通 API 响应。 |
 | `mailboxes` | `id`、`connection_id`、`provider_mailbox_key`、`address`、`display_name`、`sync_state`、`last_synced_at` | 同一连接下上游邮箱键唯一；A1 由管理员显式登记地址。 |
 | `messages` | `id`、`mailbox_id`、`provider_message_key`、`rfc_message_id`、`sender`、`recipient`、`subject`、`snippet`、`received_at`、`body_text`、`verification_code`、`created_at` | 同一邮箱下上游消息键唯一，重复同步执行 upsert；A1 仅存纯文本正文，不渲染上游 HTML。`rfc_message_id` 仅作为后续跨读取方式核对线索，不在 A1 中作为唯一键。 |
-| `sync_runs` | `id`、`connection_id`、`started_at`、`finished_at`、`status`、`error_code`、`error_summary`、`new_message_count` | 记录每次手动/定时同步结果，不记录凭据或完整邮件正文。 |
+| `sync_runs` | `id`、`connection_id`、`mailbox_id`、`started_at`、`finished_at`、`status`、`error_code`、`error_summary`、`new_message_count` | 记录每个邮箱的手动/定时同步结果，不记录凭据或完整邮件正文。 |
 
 所有时间以 UTC 存储。`provider_message_key` 由上游读取方式 `method` 与上游 `id` 共同构成，避免 Graph ID 与 IMAP UID 碰撞；核心把它作为不透明字符串处理，不根据其格式推断顺序。消息列表按 `received_at DESC, id DESC` 排序。邮箱地址用于展示和查询，但内部关联只用 ID，避免别名更名导致索引错配。
 
@@ -64,7 +64,7 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 ## 6. 安全、错误与运行
 
 - API Key 和加密主密钥不出现在 URL、页面响应、日志或错误摘要中；主密钥丢失时只能从备份恢复，不提供明文导出。
-- 会话令牌不进入数据库明文或浏览器脚本；退出登录必须撤销服务端会话，不能只删除 Cookie。反向代理按真实直连来源对登录请求限速，API 不采信未经配置的转发 IP 头。
+- 会话令牌不进入数据库明文或浏览器脚本；退出登录必须撤销服务端会话，不能只删除 Cookie。A1 单 worker 按规范化用户名与直连对端 IP 对失败登录做内存限速：15 分钟内 5 次失败后拒绝同一键的请求；不采信未经配置的转发 IP 头。反代下同一用户名的共享出口 IP 会共享该桶，这一运维限制在 A4 的多用户/可信代理设计中解决。
 - 所有上游 HTTP 请求有连接超时和总超时；仅对超时和 5xx 作有限重试，401/403 与契约错误不自动重试。
 - 上游目标采用部署配置中的显式 `MAILS_UPSTREAM_ORIGINS` 白名单：管理员填写的 `base_url` 必须与其中一个 origin 完全匹配。生产 origin 必须是 HTTPS；本机开发才可将 HTTP 本地 origin 列入白名单。适配器不跟随跨 origin 重定向，防止任意服务端请求。
 - 同步任务同一邮箱不能并发执行；请求重复触发时返回当前运行状态，不排队叠加。
