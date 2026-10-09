@@ -53,11 +53,14 @@ async def test_paging_uses_page_size_not_has_more(count, skips):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
-    assert len(result) == min(count, 100)
+    assert len(result.summaries) == min(count, 100)
     assert [int(c.url.params["skip"]) for c in calls] == skips
-    if result:
-        assert result[0].received_at == datetime.fromtimestamp(1760000000, timezone.utc)
-        assert result[0].sender == "sender@example.com"
+    assert result.issues == []
+    if result.summaries:
+        assert result.summaries[0].received_at == datetime.fromtimestamp(
+            1760000000, timezone.utc
+        )
+        assert result.summaries[0].sender == "sender@example.com"
 
 
 @pytest.mark.asyncio
@@ -123,7 +126,8 @@ async def test_transient_errors_retry_once(failure, recover, code):
             assert KEY not in str(exc.value)
             assert exc.value.__cause__ is None
         else:
-            assert await adapter.list_messages(BASE_URL, KEY, EMAIL) == []
+            result = await adapter.list_messages(BASE_URL, KEY, EMAIL)
+            assert result.summaries == [] and result.issues == []
     assert len(calls) == 2
 
 
@@ -145,9 +149,11 @@ async def test_malformed_summary_is_contract_error(item):
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _: ok({"emails": [item]}))
     ) as client:
-        with pytest.raises(ProviderError) as exc:
-            await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
-    assert exc.value.code == "UPSTREAM_CONTRACT"
+        result = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+    assert result.summaries == []
+    assert [(issue.absolute_index, issue.code) for issue in result.issues] == [
+        (0, "UPSTREAM_CONTRACT")
+    ]
 
 
 @pytest.mark.asyncio
@@ -160,7 +166,10 @@ async def test_reading_methods_keep_numeric_ids_distinct():
         )
     ) as client:
         messages = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
-    assert messages[0].provider_message_key != messages[1].provider_message_key
+    assert (
+        messages.summaries[0].provider_message_key
+        != messages.summaries[1].provider_message_key
+    )
 
 
 @pytest.mark.asyncio
@@ -261,7 +270,7 @@ async def test_details_encode_single_segment_and_use_plain_content(raw, expected
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookPlusAdapter(client)
         summaries = await adapter.list_messages(BASE_URL, KEY, EMAIL)
-        result = await adapter.get_message(BASE_URL, KEY, EMAIL, summaries[0])
+        result = await adapter.get_message(BASE_URL, KEY, EMAIL, summaries.summaries[0])
     assert result.body_text == "plain body"
     assert result.recipient == EMAIL
     assert result.snippet == "hello"
@@ -274,9 +283,11 @@ async def test_huge_integer_timestamp_is_sanitized_contract_error():
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _: ok({"emails": [item]}))
     ) as client:
-        with pytest.raises(ProviderError) as exc:
-            await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
-    assert exc.value.code == "UPSTREAM_CONTRACT"
+        result = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+    assert result.summaries == []
+    assert [(issue.absolute_index, issue.code) for issue in result.issues] == [
+        (0, "UPSTREAM_CONTRACT")
+    ]
 
 
 @pytest.mark.asyncio
@@ -295,7 +306,7 @@ async def test_dot_ids_remain_single_path_segment(provider_id, segment):
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookPlusAdapter(client)
         result = await adapter.list_messages(BASE_URL, KEY, EMAIL)
-        await adapter.get_message(BASE_URL, KEY, EMAIL, result[0])
+        await adapter.get_message(BASE_URL, KEY, EMAIL, result.summaries[0])
 
 
 @pytest.mark.asyncio
@@ -350,7 +361,7 @@ async def test_malformed_detail_never_becomes_a_normalized_message(changes):
         adapter = OutlookPlusAdapter(client)
         messages = await adapter.list_messages(BASE_URL, KEY, EMAIL)
         with pytest.raises(ProviderError) as exc:
-            await adapter.get_message(BASE_URL, KEY, EMAIL, messages[0])
+            await adapter.get_message(BASE_URL, KEY, EMAIL, messages.summaries[0])
     assert exc.value.code == "UPSTREAM_CONTRACT"
 
 
@@ -370,8 +381,8 @@ async def test_retry_waits_200ms(monkeypatch):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assert (
-            await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL) == []
-        )
+            await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+        ).summaries == []
     assert waits == [0.2]
 
 
@@ -417,3 +428,58 @@ async def test_total_deadline_maps_to_timeout_and_retries_once(monkeypatch):
     assert exc.value.code == "UPSTREAM_TIMEOUT"
     assert deadlines == [20, 20]
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_bad_summary_preserves_following_valid_summary_and_safe_issue():
+    from dataclasses import asdict
+
+    bad = summary(id="", subject=KEY, content_preview=EMAIL)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: ok({"emails": [bad, summary(id="good")]})
+        )
+    ) as client:
+        result = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+    assert [item.provider_id for item in result.summaries] == ["good"]
+    assert [asdict(issue) for issue in result.issues] == [
+        {"absolute_index": 0, "code": "UPSTREAM_CONTRACT"}
+    ]
+    assert KEY not in repr(result.issues)
+    assert EMAIL not in repr(result.issues)
+
+
+@pytest.mark.asyncio
+async def test_full_page_with_bad_summary_still_fetches_second_page():
+    calls = []
+
+    def handler(request):
+        skip = int(request.url.params["skip"])
+        calls.append(skip)
+        if skip == 0:
+            page = [summary(id="")] + [summary(id=str(i)) for i in range(1, 50)]
+        else:
+            page = [summary(id="50"), summary(timestamp="bad"), summary(id="52")]
+        return ok({"emails": page, "has_more": False})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+    assert calls == [0, 50]
+    assert [item.provider_id for item in result.summaries] == [
+        str(i) for i in range(1, 51)
+    ] + ["52"]
+    assert [(issue.absolute_index, issue.code) for issue in result.issues] == [
+        (0, "UPSTREAM_CONTRACT"),
+        (51, "UPSTREAM_CONTRACT"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", [None, {}, "bad", [summary()] * 51])
+async def test_page_shape_failure_still_raises_provider_error(page):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: ok({"emails": page}))
+    ) as client:
+        with pytest.raises(ProviderError) as exc:
+            await OutlookPlusAdapter(client).list_messages(BASE_URL, KEY, EMAIL)
+    assert exc.value.code == "UPSTREAM_CONTRACT"

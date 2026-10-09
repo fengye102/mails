@@ -9,7 +9,13 @@ from email.parser import Parser
 from urllib.parse import quote
 
 import httpx
-from mails_api.providers.base import MessageSummary, NormalizedMessage, ProviderError
+from mails_api.providers.base import (
+    MessageListIssue,
+    MessageListResult,
+    MessageSummary,
+    NormalizedMessage,
+    ProviderError,
+)
 
 
 def _contract_error() -> ProviderError:
@@ -136,8 +142,9 @@ class OutlookPlusAdapter:
 
     async def list_messages(
         self, base_url: str, api_key: str, email: str
-    ) -> list[MessageSummary]:
+    ) -> MessageListResult:
         summaries = []
+        issues = []
         for skip in (0, 50):
             data = await self._get_data(
                 base_url,
@@ -148,10 +155,16 @@ class OutlookPlusAdapter:
             page = data.get("emails")
             if not isinstance(page, list) or len(page) > 50:
                 raise _contract_error()
-            summaries.extend(self._parse_summary(item) for item in page)
+            for position, item in enumerate(page):
+                try:
+                    summaries.append(self._parse_summary(item))
+                except ProviderError as exc:
+                    issues.append(
+                        MessageListIssue(absolute_index=skip + position, code=exc.code)
+                    )
             if len(page) < 50:
                 break
-        return summaries[:100]
+        return MessageListResult(summaries=summaries[:100], issues=issues)
 
     async def get_message(
         self, base_url: str, api_key: str, email: str, summary: MessageSummary

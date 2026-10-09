@@ -19,6 +19,18 @@ class MessageSummary:
 
 
 @dataclass(frozen=True)
+class MessageListIssue:
+    absolute_index: int
+    code: str
+
+
+@dataclass(frozen=True)
+class MessageListResult:
+    summaries: list[MessageSummary]
+    issues: list[MessageListIssue]
+
+
+@dataclass(frozen=True)
 class NormalizedMessage(MessageSummary):
     recipient: str
     body_text: str

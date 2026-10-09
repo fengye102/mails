@@ -186,7 +186,7 @@ if not provided or not hmac.compare_digest(provided, session.csrf_token):
 
 **Files:** Create `apps/api/src/mails_api/providers/{base,outlook_plus}.py`, `apps/api/tests/test_outlook_plus.py`.
 
-**Interfaces:** `OutlookPlusAdapter(client: httpx.AsyncClient)` implements `probe(base_url, api_key)`, `check_mailbox(base_url, api_key, email)`, `list_messages(base_url, api_key, email) -> list[MessageSummary]`, `get_message(base_url, api_key, email, summary) -> NormalizedMessage`. `MessageSummary` contains `provider_id`, `method`, `sender`, `subject`, `snippet`, `received_at`. `NormalizedMessage` adds `recipient`, `body_text`, `rfc_message_id`.
+**Interfaces:** `OutlookPlusAdapter(client: httpx.AsyncClient)` implements `probe(base_url, api_key)`, `check_mailbox(base_url, api_key, email)`, `list_messages(base_url, api_key, email) -> MessageListResult`, `get_message(base_url, api_key, email, summary) -> NormalizedMessage`. `MessageSummary` contains `provider_id`, `method`, `sender`, `subject`, `snippet`, `received_at`. `NormalizedMessage` adds `recipient`, `body_text`, `rfc_message_id`. `MessageListResult` contains `summaries: list[MessageSummary]` and `issues: list[MessageListIssue]`; each issue contains only zero-based `absolute_index` (skip + position) and fixed safe `code`, with no source content, ID or credentials. Parse failures are isolated per item; envelope/page shape failures still raise `ProviderError`.
 
 - [ ] **Step 1: Write a failing mocked HTTP test for paging and auth.**
 
@@ -205,7 +205,8 @@ async def test_list_fetches_second_page_even_when_has_more_false():
                                           {"emails": items, "has_more": False}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await OutlookPlusAdapter(client).list_messages("https://mail.example", "test-key", "a@example.com")
-    assert len(result) == 51
+    assert len(result.summaries) == 51
+    assert result.issues == []
     assert [int(c.url.params["skip"]) for c in calls] == [0, 50]
 ```
 
@@ -213,17 +214,22 @@ async def test_list_fetches_second_page_even_when_has_more_false():
 - [ ] **Step 3: Implement exact transport contract.** Set `follow_redirects=False`, 5 s connect/20 s total timeout, and `X-API-Key` header. `probe` calls health/capabilities and requires `message_list` + `message_detail`; `check_mailbox` requires `exists` and `can_read`; `list_messages` calls `top=50,skip=0` and `skip=50` only if first page contains 50 entries, never trusts `has_more`. `get_message` URL-encodes `provider_id` as a single path segment and passes `email` + `folder=inbox` query, uses detail `content` as plain text, parses `Message-ID` only when `raw_content` is a valid RFC message. Reject `{success:false}` even with HTTP 200. Map 401/403 to `UPSTREAM_AUTH`, timeout to `UPSTREAM_TIMEOUT`, malformed shape to `UPSTREAM_CONTRACT`; sanitize error summaries. Retry timeout and 5xx once after 200 ms; never retry 401/403, non-5xx client errors or malformed payloads.
 
 ```python
+summaries, issues = [], []
 for skip in (0, 50):
     data = await self._get_data(base_url, api_key, "/api/external/messages",
                                 params={"email": email, "folder": "inbox", "skip": skip, "top": 50})
     page = data["emails"]
-    summaries.extend(self._parse_summary(item) for item in page)
+    for position, item in enumerate(page):
+        try:
+            summaries.append(self._parse_summary(item))
+        except ProviderError as exc:
+            issues.append(MessageListIssue(absolute_index=skip + position, code=exc.code))
     if len(page) < 50:
         break
-return summaries[:100]
+return MessageListResult(summaries=summaries[:100], issues=issues)
 ```
 
-- [ ] **Step 4: Expand tests.** Add success-false HTTP 200, 401 without retry, timeout then success, repeated timeout failure, missing ID, malformed timestamp, details with HTML plus plain `content`, and a Graph/IMAP equal numeric ID producing different `provider_message_key`; rerun adapter suite.
+- [ ] **Step 4: Expand tests.** Add success-false HTTP 200, 401 without retry, timeout then success, repeated timeout failure, missing ID, malformed timestamp, details with HTML plus plain `content`, and a Graph/IMAP equal numeric ID producing different `provider_message_key`; rerun adapter suite. Add malformed-summary followed by valid-summary and full-page malformed-summary followed by page two regressions; assert valid summaries survive, issue indices are absolute, and page-size decisions use raw entries.
 - [ ] **Step 5: Commit.** `git add apps/api && git commit -m "feat(api): add OutlookEmailPlus read adapter"`.
 
 ### Task 5: Encrypted connection and mailbox management
@@ -265,7 +271,7 @@ return nonce + AESGCM(key).encrypt(nonce, value.encode("utf-8"), None)
 
 **Files:** Create `apps/api/src/mails_api/services/{extract,sync}.py`, `apps/api/src/mails_api/routes/sync_runs.py`, `apps/api/tests/{test_extract,test_sync}.py`; modify `app.py` for one 60-second periodic sync loop.
 
-**Interfaces:** `extract_code(subject: str, body_text: str) -> str | None`; `async sync_mailbox(db, mailbox_id, adapter, now) -> SyncRun`; `POST /api/v1/mailboxes/{id}/sync`, `GET /api/v1/sync-runs` with an optional `mailbox_id` query. Task 7 consumes persisted messages.
+**Interfaces:** `extract_code(subject: str, body_text: str) -> str | None`; `async sync_mailbox(db, mailbox_id, adapter, now) -> SyncRun`; `POST /api/v1/mailboxes/{id}/sync`, `GET /api/v1/sync-runs` with an optional `mailbox_id` query. Task 7 consumes persisted messages. Consume Task 4 `MessageListResult`: record its safe issues as partial and process every valid summary; fake_adapter returns the same structured result.
 
 - [ ] **Step 1: Write failing extraction and dedupe tests.**
 
@@ -287,7 +293,7 @@ async def test_repeat_sync_is_idempotent(db, mailbox, fake_adapter, frozen_now):
 ```
 
 - [ ] **Step 2: Run failure.** `uv run --project apps/api --python 3.12 pytest apps/api/tests/test_extract.py apps/api/tests/test_sync.py -q` → missing services.
-- [ ] **Step 3: Implement.** Extraction accepts one 4–8 digit candidate adjacent to `code|验证码|verification|verify`; if conflicting candidates exist return `None`. Sync creates `SyncRun(status="running")`, acquires per-mailbox in-process `asyncio.Lock`, fetches at most 100 summaries, skips entries older than seven days only on first sync, queries existing `(mailbox_id, method:id)` keys in one statement, fetches detail only for unseen entries, inserts each valid message, records individual parse failures, commits per mailbox, and marks status `success|partial|failed` with safe error code/summary. On a second simultaneous trigger return current run without scheduling another. Background loop invokes the same service every 60 seconds and is cancelled cleanly at shutdown.
+- [ ] **Step 3: Implement.** Extraction accepts one 4–8 digit candidate adjacent to `code|验证码|verification|verify`; if conflicting candidates exist return `None`. Sync creates `SyncRun(status="running")`, acquires per-mailbox in-process `asyncio.Lock`, fetches a structured result for at most 100 raw entries, records `result.issues` as partial without discarding `result.summaries`, skips entries older than seven days only on first sync, queries existing `(mailbox_id, method:id)` keys in one statement, fetches detail only for unseen entries, inserts each valid message, records individual parse failures, commits per mailbox, and marks status `success|partial|failed` with safe error code/summary. On a second simultaneous trigger return current run without scheduling another. Background loop invokes the same service every 60 seconds and is cancelled cleanly at shutdown.
 
 ```python
 key = f"{summary.method}:{summary.provider_id}"

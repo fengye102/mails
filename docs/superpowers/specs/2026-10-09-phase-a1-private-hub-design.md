@@ -39,7 +39,9 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 3. 手动同步和定时同步使用 `GET /api/external/messages?email=...&folder=inbox&skip=...&top=50` 按邮箱读取摘要；最多读取两页、100 封，不依赖当前实现恒为 `false` 的 `has_more`。只对尚未索引的消息使用 `GET /api/external/messages/{message_id}?email=...&folder=inbox` 获取正文。两种接口均检查上游的 `{success, code, data}` 包装层，不能仅凭 HTTP 200 判断成功。
 4. 适配器把上游数据变为内部 `NormalizedMessage`：读取方式与上游 ID、邮箱 ID、发件人、收件人、主题、UTC 收件时间、纯文本正文和摘要。无上游 ID 的响应作为适配器错误，不通过正文哈希猜测身份。从上游 `raw_content` 解析到有效 `Message-ID` 时记录 `rfc_message_id`，否则留空。上游从 Graph 回退到 IMAP 时，同一封实体邮件可能获得新 ID；跨方式自动合并在 A4 完成，以免在证据不足时错误合并不同邮件。
 5. 核心从纯文本正文和主题中用确定性规则提取 4–8 位数字验证码；有多个候选且无法明确判定时返回空值，不猜测。提取结果写入 `messages.verification_code`，可由用户在界面复制。
-6. 每次同步在单个邮箱粒度提交；单封邮件解析失败记录错误并继续处理后续邮件，单个邮箱失败不阻断其他邮箱。同步记录准确反映部分成功与失败。
+6. 每次同步在单个邮箱粒度提交；单封邮件解析失败记录错误并继续处理后续邮件，单个邮箱失败不阻断其他邮箱。适配器 `list_messages` 返回 `MessageListResult(summaries, issues)`：summaries 仅含成功规范化的摘要；issues 的 `MessageListIssue` 仅含从零起的 `absolute_index`（skip + 页内位置）与固定安全错误码 `code`，不含原邮件内容、上游 ID 或凭据。坏摘要不阻断同页后续项或第二页，是否读取第二页仍由原始页条数决定；整体包装层/分页形状错误仍抛 `ProviderError`。同步服务消费 issues 并记录 partial，同时继续有效摘要及详情；详情逐封失败也继续处理。同步记录准确反映部分成功与失败。
+
+2026-10-09 Task 4 审查修订：原计划的摘要 fail-fast 示例与本节单封失败隔离要求冲突，以本规格为准，改为结构化有效摘要与逐封问题结果；Task 6 按新接口消费。
 
 为避免无限制拉取，A1 每个邮箱首次同步只保存最近 7 天、最多 100 封；之后每次读取最近 100 封并依靠读取方式与上游消息 ID 去重。重复同步不重复拉取已索引邮件的正文。管理员可手动重试。历史补全和自定义保留期归入 A4。
 
