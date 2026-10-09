@@ -7,14 +7,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from mails_api.db import get_db
 from mails_api.models import Message
-from mails_api.security.sessions import get_current_session
+from mails_api.security.csrf import require_member
 from pydantic import AwareDatetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import load_only
 
 router = APIRouter(
-    prefix="/api/v1/messages", dependencies=[Depends(get_current_session)]
+    prefix="/api/v1/messages", dependencies=[Depends(require_member)]
 )
 
 

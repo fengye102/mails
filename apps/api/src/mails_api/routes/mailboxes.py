@@ -18,13 +18,13 @@ from mails_api.routes.connections import (
     get_http_client,
 )
 from mails_api.security.crypto import decrypt_secret
-from mails_api.security.csrf import require_csrf, require_owner
+from mails_api.security.csrf import require_csrf, require_member, require_owner
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
-router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_owner)])
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_member)])
 
 
 class MailboxInput(BaseModel):
@@ -55,7 +55,7 @@ def mailbox_payload(mailbox: Mailbox) -> dict:
 @router.post(
     "/connections/{connection_id}/mailboxes",
     status_code=201,
-    dependencies=[Depends(require_csrf)],
+    dependencies=[Depends(require_owner), Depends(require_csrf)],
 )
 async def create_mailbox(
     connection_id: UUID,

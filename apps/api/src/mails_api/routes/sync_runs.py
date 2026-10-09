@@ -12,12 +12,12 @@ from mails_api.routes.connections import (
     encryption_key,
     get_http_client,
 )
-from mails_api.security.csrf import require_csrf, require_owner
+from mails_api.security.csrf import require_csrf, require_member, require_owner
 from mails_api.services.sync import sync_mailbox
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_owner)])
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_member)])
 
 
 def run_payload(run: SyncRun) -> dict:
@@ -34,7 +34,7 @@ def run_payload(run: SyncRun) -> dict:
     }
 
 
-@router.post("/mailboxes/{mailbox_id}/sync", dependencies=[Depends(require_csrf)])
+@router.post("/mailboxes/{mailbox_id}/sync", dependencies=[Depends(require_owner), Depends(require_csrf)])
 async def trigger_sync(
     mailbox_id: UUID,
     request: Request,
