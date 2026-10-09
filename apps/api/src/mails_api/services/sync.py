@@ -10,7 +10,6 @@ import httpx
 from cryptography.exceptions import InvalidTag
 from mails_api.models import Mailbox, Message, ProviderConnection, SyncRun, utc_now
 from mails_api.providers.base import ProviderError
-from mails_api.providers.base import MailProvider
 from mails_api.security.crypto import decrypt_secret
 from mails_api.services.extract import extract_code
 from sqlalchemy import select

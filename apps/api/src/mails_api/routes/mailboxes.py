@@ -14,8 +14,8 @@ from mails_api.routes.connections import (
     allowed_origin,
     checked_time,
     encryption_key,
-    get_http_client,
     get_adapter_for,
+    get_http_client,
 )
 from mails_api.security.crypto import decrypt_secret
 from mails_api.security.csrf import require_csrf, require_owner
