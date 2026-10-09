@@ -13,10 +13,18 @@
 | 来源 | A 阶段集成方式 | 经代码/文档确认的接口线索 |
 | --- | --- | --- |
 | OutlookEmailPlus | 使用 `X-API-Key` 对外接口；管理员显式配置可读邮箱地址，不依赖其后台会话做账号发现。 | `/api/external/health`、`/api/external/account-status`、`/api/external/messages`、`/api/external/messages/{message_id}` |
-| cloudflare_temp_email | 使用独立部署的 Worker 管理接口；连接凭据由统一核心加密保存。 | `/open_api/admin_login`、`/admin/address`、`/admin/mails`、`/admin/mails/:id` |
+| cloudflare_temp_email | 使用独立部署的 Worker 管理接口；连接凭据由统一核心加密保存。 | `x-admin-auth` 请求头、`/admin/address`、`/admin/mails`、`/admin/mails/:id` |
 | CYMail | 使用其服务端 API；iCloud 登录与浏览器扩展继续由 CYMail 管理。 | `/api/accounts`、`/api/aliases`、`/api/messages`、`/api/inbox` |
 
 接口线索只表示仓库中存在相应路由，不表示响应契约已经通过运行验证。每个适配器落地前必须先用固定版本的上游和契约测试确认鉴权、分页、消息 ID、时间格式及错误语义。
+
+已核实的接入限制：
+
+- OutlookEmailPlus 外部接口按邮箱地址读取，不提供用外部 API Key 枚举所有账号；A1 由管理员显式登记地址。单页 `top` 上限为 50，当前列表响应的 `has_more` 恒为 `false`，所以适配器按 `skip` 和实际返回条数分页，而非信任该字段。
+- cloudflare_temp_email 的 `/open_api/admin_login` 只校验口令并返回成功标志，不产生供管理接口使用的 JWT。管理接口实际使用 `x-admin-auth` 请求头，且可能配置 `ADMIN_API_IP_WHITELIST`；适配器仅由服务端发送该密钥。
+- CYMail 的 `/api/messages` 读取已采集到其 PostgreSQL 的统一邮件，要求配置 `DATABASE_URL`；它不是直接读取 Apple 收件箱的接口。A3 须验证采集任务与 `/api/mail/collect` 后再依赖此列表。
+
+对应固定版本源码：[OutlookEmailPlus 邮件读取](https://github.com/ZeroPointSix/outlookEmailPlus/blob/ea531a1f40e7badd0769a46f906213f02bab7c82/outlook_web/services/external_api.py)、[Cloudflare Worker 管理鉴权](https://github.com/dreamhunter2333/cloudflare_temp_email/blob/be7ba25a574edbf567f57d1f97b21cb200ee84b9/worker/src/worker.ts)、[CYMail 统一邮件接口](https://github.com/fengye102/cymail/blob/b186781bdfcc32dbad458c9d9c81a306148edab9/admin-server/internal/server/fulfillment.go)。
 
 ## 内部交付顺序
 

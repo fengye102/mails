@@ -33,8 +33,8 @@ A1 不承担 Outlook OAuth 授权、IMAP 密码登录或上游账号导入；这
 
 ## 4. 上游契约与数据流
 
-1. 管理员在 OutlookEmailPlus 内完成 Outlook 或 IMAP 邮箱授权，并创建只读范围的外部 API Key。
-2. 管理员在本项目登记上游 `base_url`、API Key 和待纳入统一后台的邮箱地址。API 首先用 `/api/external/health` 探测服务，再用 `/api/external/account-status` 验证每个地址可读；失败时不激活连接或邮箱。
+1. 管理员在 OutlookEmailPlus 内完成 Outlook 或 IMAP 邮箱授权，并创建启用的外部 API Key，将 `allowed_emails` 收窄到要纳入本项目的地址。若上游开启公网模式，还须把本项目 API 的出口 IP 纳入其白名单；邮箱池权限不是 A1 的前提。
+2. 管理员在本项目登记上游 `base_url`、API Key 和待纳入统一后台的邮箱地址。API 使用 `X-API-Key` 调用 `/api/external/health` 和 `/api/external/capabilities`，要求 `message_list` 与 `message_detail` 能力可用，再用 `/api/external/account-status?email=...` 验证每个地址的 `exists` 与 `can_read`；失败时不激活连接或邮箱。上游接口不依赖其后台 Cookie 或 CSRF Token。
 3. 手动同步和定时同步使用 `GET /api/external/messages?email=...&folder=inbox&skip=...&top=50` 按邮箱读取摘要；最多读取两页、100 封，不依赖当前实现恒为 `false` 的 `has_more`。只对尚未索引的消息使用 `GET /api/external/messages/{message_id}?email=...&folder=inbox` 获取正文。两种接口均检查上游的 `{success, code, data}` 包装层，不能仅凭 HTTP 200 判断成功。
 4. 适配器把上游数据变为内部 `NormalizedMessage`：读取方式与上游 ID、邮箱 ID、发件人、收件人、主题、UTC 收件时间、纯文本正文和摘要。无上游 ID 的响应作为适配器错误，不通过正文哈希猜测身份。从上游 `raw_content` 解析到有效 `Message-ID` 时记录 `rfc_message_id`，否则留空。上游从 Graph 回退到 IMAP 时，同一封实体邮件可能获得新 ID；跨方式自动合并在 A4 完成，以免在证据不足时错误合并不同邮件。
 5. 核心从纯文本正文和主题中用确定性规则提取 4–8 位数字验证码；有多个候选且无法明确判定时返回空值，不猜测。提取结果写入 `messages.verification_code`，可由用户在界面复制。
