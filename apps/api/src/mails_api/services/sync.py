@@ -1,6 +1,7 @@
 """Single-worker, per-engine/per-mailbox non-queuing synchronization."""
 
 import asyncio
+import logging
 from datetime import timedelta, timezone
 from weakref import WeakKeyDictionary
 
@@ -57,11 +58,20 @@ async def sync_mailbox(
     engine = db.get_bind()
     active = _running.setdefault(engine, {})
     if mailbox_id in active:
-        return db.get(SyncRun, active[mailbox_id][1])
+        current = db.get(SyncRun, active[mailbox_id][1])
+        db.expunge(current)
+        db.rollback()
+        return current
     mailbox = db.get(Mailbox, mailbox_id)
     if mailbox is None:
         raise LookupError("MAILBOX_NOT_FOUND")
     connection = db.get(ProviderConnection, mailbox.connection_id)
+    # Cache scalar values before commit expires ORM instances. No connection
+    # may be held while waiting for upstream I/O.
+    base_url, address = connection.base_url, mailbox.address
+    connection_status, encrypted_secret = connection.status, connection.encrypted_secret
+    first_sync = mailbox.last_synced_at is None
+    messages = []
     lock = asyncio.Lock()
     async with lock:
         run = SyncRun(
@@ -73,11 +83,12 @@ async def sync_mailbox(
         )
         db.add(run)
         mailbox.sync_state = "running"
+        db.flush()
+        db.expunge(run)
         db.commit()
         active[mailbox_id] = (lock, run.id)
-        first_sync = mailbox.last_synced_at is None
         try:
-            if connection.status != "active":
+            if connection_status != "active":
                 raise ProviderError("UPSTREAM_UNAVAILABLE")
             try:
                 if encryption_key is None:
@@ -85,13 +96,11 @@ async def sync_mailbox(
                         raise ValueError
                     secret = ""
                 else:
-                    secret = decrypt_secret(encryption_key, connection.encrypted_secret)
+                    secret = decrypt_secret(encryption_key, encrypted_secret)
             except (ValueError, TypeError, InvalidTag, UnicodeError):
                 _record_error(run, "CONNECTION_SECRET_INVALID")
                 raise ProviderError("UPSTREAM_UNAVAILABLE") from None
-            result = await adapter.list_messages(
-                connection.base_url, secret, mailbox.address
-            )
+            result = await adapter.list_messages(base_url, secret, address)
             for issue in result.issues:
                 _record_error(run, issue.code)
             summaries = result.summaries[:100]
@@ -99,11 +108,12 @@ async def sync_mailbox(
             existing = set(
                 db.scalars(
                     select(Message.provider_message_key).where(
-                        Message.mailbox_id == mailbox.id,
+                        Message.mailbox_id == mailbox_id,
                         Message.provider_message_key.in_(keys),
                     )
                 )
             )
+            db.rollback()  # Release the dedupe query transaction before details.
             for summary in summaries:
                 key = summary.provider_message_key
                 received = summary.received_at.replace(
@@ -115,12 +125,12 @@ async def sync_mailbox(
                     continue
                 try:
                     detail = await adapter.get_message(
-                        connection.base_url, secret, mailbox.address, summary
+                        base_url, secret, address, summary
                     )
                     if detail.provider_message_key != key:
                         raise ProviderError("UPSTREAM_CONTRACT")
                     message = Message(
-                        mailbox_id=mailbox.id,
+                        mailbox_id=mailbox_id,
                         provider_message_key=key,
                         rfc_message_id=detail.rfc_message_id,
                         sender=detail.sender,
@@ -136,11 +146,10 @@ async def sync_mailbox(
                 except Exception as exc:  # noqa: BLE001 - isolate malformed provider data safely
                     _record_error(run, _safe_code(exc))
                     continue
-                db.add(message)
+                messages.append(message)
                 existing.add(key)
                 run.new_message_count += 1
             run.status = "partial" if run.error_code else "success"
-            mailbox.last_synced_at = now
         except asyncio.CancelledError:
             run.status = "failed"
             _record_error(run, "SYNC_CANCELLED")
@@ -151,8 +160,16 @@ async def sync_mailbox(
         finally:
             try:
                 run.finished_at = utc_now()
+                mailbox = db.get(Mailbox, mailbox_id)
                 mailbox.sync_state = run.status
+                if run.status in {"success", "partial"}:
+                    mailbox.last_synced_at = now
+                db.add_all(messages)
+                run = db.merge(run)
                 db.commit()
+                db.refresh(run)
+                db.expunge(run)
+                db.rollback()  # Return a loaded result without retaining a connection.
             finally:
                 active.pop(mailbox_id, None)
         return run
@@ -185,11 +202,19 @@ async def sync_all_mailboxes(app):
             )
 
     async def run(client):
-        # Exceptions are isolated at the mailbox boundary, not leaked to logs.
-        await asyncio.gather(
-            *(sync_one(item, OutlookPlusAdapter(client)) for item in ids),
-            return_exceptions=True,
-        )
+        # A fixed worker set bounds both tasks and concurrent upstream requests.
+        pending = iter(ids)
+
+        async def worker():
+            for mailbox_id in pending:
+                try:
+                    await sync_one(mailbox_id, OutlookPlusAdapter(client))
+                except Exception:  # noqa: BLE001 - isolate a mailbox's DB/config failure
+                    logging.getLogger(__name__).warning(
+                        "Mailbox synchronization failed."
+                    )
+
+        await asyncio.gather(*(worker() for _ in range(min(4, len(ids)))))
 
     if app.state.upstream_client is not None:
         await run(app.state.upstream_client)

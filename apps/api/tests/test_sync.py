@@ -349,3 +349,108 @@ async def test_real_adapter_without_key_never_sends_request(db, mailbox):
     assert run.status == "failed"
     assert run.error_code == "CONNECTION_SECRET_INVALID"
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_small_pool_released_during_http_and_scheduler_is_bounded(tmp_path):
+    import base64
+    from types import SimpleNamespace
+
+    import httpx
+    from mails_api.services.sync import sync_all_mailboxes
+    from mails_api.settings import Settings
+    from sqlalchemy import create_engine
+
+    engine = create_engine(
+        "sqlite:///" + str(tmp_path / "limited-pool.db"),
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.1,
+    )
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        connection = ProviderConnection(
+            kind="outlook_plus",
+            name="test",
+            base_url="https://mail.example",
+            encrypted_secret=encrypt_secret(KEY, "secret"),
+            status="active",
+        )
+        db.add(connection)
+        db.flush()
+        for index in range(8):
+            db.add(
+                Mailbox(
+                    connection_id=connection.id,
+                    provider_mailbox_key=str(index),
+                    address=f"box{index}@example.com",
+                    sync_state="idle",
+                )
+            )
+        db.commit()
+    active = peak = ticks = 0
+    checked_out = []
+    pulse_counts = []
+
+    async def heartbeat():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.001)
+
+    async def upstream(request):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        checked_out.append(engine.pool.checkedout())
+        before = ticks
+        await asyncio.sleep(0.01)
+        pulse_counts.append(ticks - before)
+        active -= 1
+        item = {
+            "id": "one",
+            "method": "graph",
+            "from_address": "sender",
+            "subject": "Code",
+            "content_preview": "",
+            "timestamp": datetime.now(timezone.utc).timestamp(),
+        }
+        if request.url.path.endswith("/messages"):
+            data = {"emails": [item]}
+        else:
+            data = {
+                **item,
+                "to_address": request.url.params["email"],
+                "content": "Code: 123456",
+                "raw_content": "",
+            }
+        return httpx.Response(200, json={"success": True, "code": "OK", "data": data})
+
+    settings = Settings(
+        database_url="sqlite://",
+        encryption_key=base64.b64encode(KEY).decode(),
+        public_origin="http://localhost:5173",
+        upstream_origins=["https://mail.example"],
+    )
+    pulse = asyncio.create_task(heartbeat())
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+            app = SimpleNamespace(
+                state=SimpleNamespace(
+                    engine=engine, settings=settings, upstream_client=client
+                )
+            )
+            await sync_all_mailboxes(app)
+        with Session(engine) as db:
+            runs = list(db.scalars(select(SyncRun)))
+            assert len(runs) == 8
+            assert all(run.status == "success" for run in runs)
+            assert db.scalar(select(func.count(Message.id))) == 8
+        assert checked_out and set(checked_out) == {0}
+        assert 1 < peak <= 4
+        assert all(count > 0 for count in pulse_counts)
+    finally:
+        pulse.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pulse
+        engine.dispose()

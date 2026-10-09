@@ -28,3 +28,17 @@ def test_extract_code(subject, body, expected):
 )
 def test_chinese_context_without_ascii_separator(subject, body, expected):
     assert extract_code(subject, body) == expected
+
+
+@pytest.mark.parametrize(
+    "subject,body",
+    [
+        ("Code: 123456 or 654321", ""),
+        ("Verification codes: 123456 or 654321", ""),
+        ("Verification failed; invoice 123456", ""),
+        ("Verification failed. Invoice 123456", ""),
+        ("Verification failed", "invoice 123456"),
+    ],
+)
+def test_conflicts_and_unrelated_clauses_are_not_codes(subject, body):
+    assert extract_code(subject, body) is None
