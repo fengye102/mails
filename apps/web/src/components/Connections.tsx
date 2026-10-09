@@ -3,6 +3,7 @@ import {
   apiFetch,
   displayTime,
   errorText,
+  providerLabels,
   statusText,
   type Connection,
 } from "../api";
@@ -11,6 +12,7 @@ export function Connections({ csrfToken }: { csrfToken: string }) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState<Connection["kind"]>("outlook_plus");
   async function load() {
     setLoading(true);
     setError("");
@@ -30,10 +32,11 @@ export function Connections({ csrfToken }: { csrfToken: string }) {
     const form = event.currentTarget;
     const data = new FormData(form);
     const body = JSON.stringify({
-      kind: "outlook_plus",
+      kind: data.get("kind"),
       name: data.get("name"),
       base_url: data.get("base_url"),
       api_key: data.get("api_key"),
+      config: data.get("account_id") ? { account_id: data.get("account_id") } : {},
     });
     (form.elements.namedItem("api_key") as HTMLInputElement).value = "";
     setBusy(true);
@@ -55,8 +58,16 @@ export function Connections({ csrfToken }: { csrfToken: string }) {
   return (
     <section>
       <h1>来源连接</h1>
-      <p>接入已配置的 OutlookEmailPlus 服务。密钥仅用于提交，不会回显。</p>
+      <p>接入上游邮件服务。密钥仅用于提交，不会回显。</p>
       <form className="form-grid" onSubmit={submit}>
+        <label>
+          来源类型
+          <select name="kind" value={kind} onChange={(event) => setKind(event.target.value as Connection["kind"])}>
+            {Object.entries(providerLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
         <label>
           连接名称
           <input name="name" required maxLength={256} />
@@ -81,6 +92,12 @@ export function Connections({ csrfToken }: { csrfToken: string }) {
             autoComplete="off"
           />
         </label>
+        {kind === "cymail" && (
+          <label>
+            账户 ID
+            <input name="account_id" required maxLength={256} autoComplete="off" />
+          </label>
+        )}
         <button disabled={busy}>{busy ? "验证中…" : "验证并添加连接"}</button>
       </form>
       {error && <p role="alert">{error}</p>}
@@ -96,6 +113,7 @@ export function Connections({ csrfToken }: { csrfToken: string }) {
           {items.map((item) => (
             <li key={item.id}>
               <h2>{item.name}</h2>
+              <p>{providerLabels[item.kind]}</p>
               <p>{item.base_url}</p>
               <p>
                 {statusText(item.status)} / 最近检查：

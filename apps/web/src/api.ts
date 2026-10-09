@@ -4,11 +4,13 @@ export interface Session {
 }
 export interface Connection {
   id: string;
+  kind: "outlook_plus" | "cloudflare_temp_email" | "cymail";
   name: string;
   base_url: string;
   status: string;
   last_error: string | null;
   last_checked_at: string | null;
+  config_summary?: Record<string, string>;
 }
 export interface Mailbox {
   id: string;
@@ -36,6 +38,11 @@ export interface Message {
   verification_code: string | null;
   body_text?: string;
 }
+export const providerLabels: Record<Connection["kind"], string> = {
+  outlook_plus: "OutlookEmailPlus",
+  cloudflare_temp_email: "Cloudflare 临时邮箱",
+  cymail: "CYMail",
+};
 const errors: Record<string, string> = {
   UPSTREAM_UNAVAILABLE: "上游服务暂不可用，请稍后重试。",
   MAILBOX_ALREADY_REGISTERED: "该邮箱已登记，请在列表中同步。",
