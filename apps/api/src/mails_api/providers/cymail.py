@@ -220,7 +220,12 @@ class CYMailAdapter:
         if not isinstance(aliases, list):
             raise _contract_error()
         for item in aliases:
-            if isinstance(item, dict) and item.get("email", "").strip().lower() == address:
+            if not isinstance(item, dict):
+                raise _contract_error()
+            alias_email = item.get("email")
+            if not isinstance(alias_email, str):
+                raise _contract_error()
+            if alias_email.strip().lower() == address:
                 if item.get("active") is not True:
                     raise _contract_error()
                 return
