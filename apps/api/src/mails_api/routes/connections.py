@@ -54,22 +54,27 @@ def canonical_origin(value: str) -> str:
         raise HTTPException(status_code=422, detail="UPSTREAM_ORIGIN_INVALID") from None
 
 
+def _is_http_loopback_origin(value: str) -> bool:
+    try:
+        parsed = urlsplit(canonical_origin(value))
+        if parsed.scheme != "http" or urlsplit(value).path:
+            return False
+        return parsed.hostname == "localhost" or ip_address(parsed.hostname).is_loopback
+    except (HTTPException, ValueError):
+        return False
+
+
 def allowed_origin(value: str, request: Request) -> str:
     origin = canonical_origin(value)
     settings = request.app.state.settings
     if origin not in {canonical_origin(item) for item in settings.upstream_origins}:
         raise HTTPException(status_code=422, detail="UPSTREAM_ORIGIN_NOT_ALLOWED")
     parsed = urlsplit(origin)
-    if parsed.scheme == "http":
-        try:
-            local = (
-                parsed.hostname == "localhost"
-                or ip_address(parsed.hostname).is_loopback
-            )
-        except ValueError:
-            local = False
-        if not local or urlsplit(settings.public_origin).scheme != "http":
-            raise HTTPException(status_code=422, detail="UPSTREAM_HTTPS_REQUIRED")
+    if parsed.scheme == "http" and (
+        not _is_http_loopback_origin(origin)
+        or not _is_http_loopback_origin(settings.public_origin)
+    ):
+        raise HTTPException(status_code=422, detail="UPSTREAM_HTTPS_REQUIRED")
     return origin
 
 

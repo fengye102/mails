@@ -216,6 +216,51 @@ def test_http_loopback_only_in_development(connected):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "public_origin",
+    [
+        "http://mails.example",
+        "http://localhost.attacker.test",
+        "http://user:pass@localhost:5173",
+        "http://localhost:5173/path",
+        "http://localhost:5173/",
+        "http://localhost:5173#fragment",
+        "http://localhost:5173?query",
+        "http://localhost:",
+    ],
+)
+def test_http_upstream_requires_valid_loopback_public_origin(connected, public_origin):
+    client, headers, state, settings = connected
+    settings.public_origin = public_origin
+    response = client.post(
+        "/api/v1/connections",
+        headers=headers,
+        json={**BODY, "base_url": "http://localhost:9000"},
+    )
+    assert response.status_code == 422
+    assert not state["requests"]
+    assert client.get("/api/v1/connections").json() == []
+    assert (
+        client.post("/api/v1/connections", headers=headers, json=BODY).status_code
+        == 201
+    )
+
+
+@pytest.mark.parametrize(
+    "public_origin",
+    ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"],
+)
+def test_http_upstream_allows_genuine_loopback_development(connected, public_origin):
+    client, headers, _, settings = connected
+    settings.public_origin = public_origin
+    response = client.post(
+        "/api/v1/connections",
+        headers=headers,
+        json={**BODY, "base_url": "http://localhost:9000"},
+    )
+    assert response.status_code == 201
+
+
 def test_rejects_empty_port(connected):
     client, headers, _, _ = connected
     response = client.post(
