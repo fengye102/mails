@@ -1,0 +1,18 @@
+{
+    auto_https disable_redirects
+}
+{$MAILS_DOMAIN} {
+    handle /api/* {
+        reverse_proxy api:8000
+        header Cache-Control "no-store"
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+}

@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - mails_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      MAILS_DATABASE_URL: ${MAILS_DATABASE_URL:?required}
+      MAILS_ENCRYPTION_KEY: ${MAILS_ENCRYPTION_KEY:?required}
+      MAILS_PUBLIC_ORIGIN: ${MAILS_PUBLIC_ORIGIN:?required}
+      MAILS_UPSTREAM_ORIGINS: ${MAILS_UPSTREAM_ORIGINS:?required}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn mails_api.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers --no-access-log"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  web:
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      MAILS_DOMAIN: ${MAILS_DOMAIN:?required}
+    ports:
+      - "443:443"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  mails_pgdata:
+  caddy_data:
+  caddy_config:

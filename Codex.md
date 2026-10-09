@@ -69,3 +69,9 @@
 - `apps/web/src/` 放应用入口、内存会话 API 客户端与样式；React 组件使用 PascalCase.tsx，交互测试同名 `.test.tsx`。
 - `apps/web/src/components/` 放登录、连接、邮箱、收件箱视图；共享 API 类型保留在 api.ts，避免引入额外状态框架。
 - `apps/web/` 放 Vite、TypeScript、npm 清单及锁文件；node_modules、dist 为任务后可重建产物，不提交。
+
+## A1 部署与集成测试文件约定
+- `infra/` 使用 compose.yaml、*.Dockerfile、Caddyfile；构建上下文仅允许清单和源码，生产数据只在命名卷，禁止提交密钥或镜像产物。
+- `tests/integration/` 使用 conftest.py 与 test_*.py；仅销毁显式配置的 mails_test 前缀 PostgreSQL 数据库中的测试表，测试后清理连接与测试 schema。
+- `docs/runbooks/` 使用小写 kebab-case.md；保留部署、恢复和验收步骤，过期步骤由更新替代；备份及密钥不得存于此目录。
+- 根目录 `.dockerignore` 限制 Docker 构建上下文，`.env.example` 仅放占位值。
