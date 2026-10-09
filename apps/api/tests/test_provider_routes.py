@@ -10,7 +10,6 @@ from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
 from sqlalchemy.orm import Session
 
-
 KEY = bytes(range(32))
 
 
