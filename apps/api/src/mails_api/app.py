@@ -2,6 +2,7 @@ import httpx
 from fastapi import FastAPI
 from sqlalchemy import Engine, create_engine
 
+from mails_api.routes.session import router as session_router
 from mails_api.settings import Settings
 
 
@@ -17,6 +18,7 @@ def create_app(
         engine if engine is not None else create_engine(settings.database_url)
     )
     app.state.upstream_client = upstream_client
+    app.include_router(session_router)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
