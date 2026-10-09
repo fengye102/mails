@@ -111,3 +111,47 @@ it("explains empty results", async () => {
     ),
   ).toBeVisible();
 });
+
+it("searches across message text and filters by source", async () => {
+  const request = vi.fn(async (path: string) =>
+    new Response(
+      JSON.stringify(
+        path.includes("/mailboxes")
+          ? []
+          : {
+              items: [
+                {
+                  id: "m1",
+                  subject: "验证",
+                  sender: "sender@example.com",
+                  snippet: "验证码",
+                  source_kind: "cymail",
+                  identity_status: "same_rfc_id",
+                  verification_code: null,
+                },
+              ],
+              total: 1,
+            },
+      ),
+    ),
+  );
+  vi.stubGlobal("fetch", request);
+  render(<Inbox />);
+
+  const search = await screen.findByLabelText("全文搜索");
+  fireEvent.change(search, { target: { value: "验证码" } });
+  fireEvent.change(screen.getByLabelText("来源类型"), {
+    target: { value: "cymail" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "筛选邮件" }));
+
+  await screen.findByRole("button", { name: "验证" });
+  const url = request.mock.calls
+    .map((call) => call[0])
+    .find((path) => path.includes("query=%E9%AA%8C%E8%AF%81%E7%A0%81"))!;
+  expect(url).toContain("source_kind=cymail");
+  expect(screen.getByText("CYMail")).toBeVisible();
+  expect(
+    screen.getByText((text) => text.includes("RFC Message-ID 相同（未合并）")),
+  ).toBeVisible();
+});

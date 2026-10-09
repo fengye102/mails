@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from mails_api.db import get_db
 from mails_api.models import Mailbox, ProviderConnection, SyncRun, utc_now
 from mails_api.routes.connections import (
@@ -12,12 +12,12 @@ from mails_api.routes.connections import (
     encryption_key,
     get_http_client,
 )
-from mails_api.security.csrf import require_csrf, require_owner
+from mails_api.security.csrf import require_csrf, require_member, require_owner
 from mails_api.services.sync import sync_mailbox
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_owner)])
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_member)])
 
 
 def run_payload(run: SyncRun) -> dict:
@@ -34,7 +34,7 @@ def run_payload(run: SyncRun) -> dict:
     }
 
 
-@router.post("/mailboxes/{mailbox_id}/sync", dependencies=[Depends(require_csrf)])
+@router.post("/mailboxes/{mailbox_id}/sync", dependencies=[Depends(require_owner), Depends(require_csrf)])
 async def trigger_sync(
     mailbox_id: UUID,
     request: Request,
@@ -56,9 +56,12 @@ async def trigger_sync(
 
 @router.get("/sync-runs")
 def list_sync_runs(
-    db: Annotated[Session, Depends(get_db)], mailbox_id: UUID | None = None
+    db: Annotated[Session, Depends(get_db)],
+    mailbox_id: UUID | None = None,
+    limit: int = Query(default=100, ge=1, le=100),
 ) -> list[dict]:
     statement = select(SyncRun).order_by(SyncRun.started_at.desc(), SyncRun.id.desc())
     if mailbox_id is not None:
         statement = statement.where(SyncRun.mailbox_id == mailbox_id)
+    statement = statement.limit(limit)
     return [run_payload(run) for run in db.scalars(statement)]

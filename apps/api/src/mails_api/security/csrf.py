@@ -20,17 +20,30 @@ def require_csrf(
         raise HTTPException(status_code=403, detail="CSRF_TOKEN_INVALID")
 
 
-def require_owner(
+def current_user(
     session: Annotated[Session, Depends(get_current_session)],
 ) -> User:
     db = object_session(session)
     user = db.get(User, session.user_id) if db is not None else None
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def require_member(
+    user: Annotated[User, Depends(current_user)],
+) -> User:
+    if user.role not in {"owner", "member"}:
+        raise HTTPException(status_code=403, detail="MEMBER_REQUIRED")
+    return user
+
+
+def require_owner(
+    user: Annotated[User, Depends(current_user)],
+) -> User:
     if user.role != "owner":
         raise HTTPException(status_code=403, detail="OWNER_REQUIRED")
     return user
-
 
 def _origin(value: str) -> tuple[str, str, int] | None:
     try:

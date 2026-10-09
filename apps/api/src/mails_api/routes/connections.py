@@ -12,12 +12,12 @@ from mails_api.models import ProviderConnection, utc_now
 from mails_api.providers.base import MailProvider, ProviderError
 from mails_api.providers.factory import PROVIDER_KINDS, provider_for
 from mails_api.security.crypto import decode_key, encrypt_secret
-from mails_api.security.csrf import require_csrf, require_owner
+from mails_api.security.csrf import require_csrf, require_member, require_owner
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-router = APIRouter(prefix="/api/v1/connections", dependencies=[Depends(require_owner)])
+router = APIRouter(prefix="/api/v1/connections", dependencies=[Depends(require_member)])
 
 
 class ConnectionInput(BaseModel):
@@ -155,7 +155,7 @@ def connection_payload(connection: ProviderConnection) -> dict:
     }
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_csrf)])
+@router.post("", status_code=201, dependencies=[Depends(require_owner), Depends(require_csrf)])
 async def create_connection(
     body: ConnectionInput,
     request: Request,

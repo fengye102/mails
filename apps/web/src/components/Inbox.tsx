@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { apiFetch, displayTime, type Mailbox, type Message } from "../api";
+import {
+  apiFetch,
+  displayTime,
+  identityLabels,
+  providerLabels,
+  type Mailbox,
+  type Message,
+} from "../api";
 export function Inbox() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]),
     [items, setItems] = useState<Message[]>([]),
@@ -55,7 +62,16 @@ export function Inbox() {
     event.preventDefault();
     const data = new FormData(event.currentTarget),
       params = new URLSearchParams();
-    for (const name of ["mailbox_id", "sender", "subject", "from", "to"]) {
+    for (const name of [
+      "mailbox_id",
+      "source_kind",
+      "connection_id",
+      "query",
+      "sender",
+      "subject",
+      "from",
+      "to",
+    ]) {
       const value = String(data.get(name) || "").trim();
       if (value)
         params.set(
@@ -118,6 +134,21 @@ export function Inbox() {
           </select>
         </label>
         <label>
+          来源类型
+          <select name="source_kind" defaultValue="">
+            <option value="">全部来源</option>
+            {Object.entries(providerLabels).map(([kind, label]) => (
+              <option key={kind} value={kind}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          全文搜索
+          <input name="query" placeholder="发件人、收件人、主题或正文" />
+        </label>
+        <label>
           发件人
           <input name="sender" />
         </label>
@@ -157,6 +188,14 @@ export function Inbox() {
                         {item.subject || "（无主题）"}
                       </button>
                       <p>{item.sender}</p>
+                      {item.source_kind && (
+                        <p>
+                          <span>来源：{providerLabels[item.source_kind]}</span>
+                          {item.identity_status && (
+                            <span> · {identityLabels[item.identity_status]}</span>
+                          )}
+                        </p>
+                      )}
                       <time>{displayTime(item.received_at)}</time>
                       <p>{item.snippet}</p>
                       {item.verification_code != null && (

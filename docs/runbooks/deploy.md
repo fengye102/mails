@@ -55,3 +55,28 @@ docker compose --env-file .env -f infra/compose.yaml run --rm --no-deps --user r
 上述 Docker/PG/真实实例/视觉/恢复检查在当前开发机均未验；不得用单元测试替代。已知终审分流：非 ASCII API Key 输入、RFC raw Message-ID 边界验证、会话恢复错误提示、阅读栏长主题；Task 9 不修改这些功能，终审决定阻断还是归入 A4。
 
 测试库保护补充：TEST_DATABASE_URL 禁止所有 URL query 参数（包括 dbname/service/host/options/connect_timeout），避免驱动参数覆盖连接目标；连接后先以 SELECT current_database() 验证真实库名匹配 URL 且以 mails_test 开头，再检查空库和执行迁移。使用不含查询参数的明确连接 URL。
+
+## A4 硬化验收
+
+A4 仍是私有后台，不开放公开注册。owner 通过受控部署主机创建只读成员：
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml exec api \
+  python -m mails_api.cli create-member member
+```
+
+成员登录后只能读取来源、邮箱、同步历史和统一收件箱；连接登记、邮箱登记、手动同步和会话删除均应返回 `403`。用单独的成员会话执行以下检查，不要复用 owner 的 Cookie：
+
+```sh
+# 读取应成功
+curl --fail --cookie members.cookies https://MAILS_DOMAIN/api/v1/messages
+curl --fail --cookie members.cookies https://MAILS_DOMAIN/api/v1/sync-runs
+# 写入应失败；若返回 2xx，立即停止验收并检查路由依赖
+curl -i -X POST --cookie members.cookies \
+  -H 'Content-Type: application/json' \
+  https://MAILS_DOMAIN/api/v1/mailboxes/MAILBOX_ID/sync
+```
+
+在收件箱中验证全文 `query`、`source_kind` 与邮箱过滤同时生效；`%`、`_` 和反斜杠按字面量搜索。每条结果显示来源类型；存在相同有效 RFC Message-ID 时只显示 `same_rfc_id` 核对提示，provider key 的邮件数量不得因此减少。`sync-runs` 未指定过滤时只返回最近 100 条，指定 `mailbox_id` 时仍按时间倒序返回该邮箱的最近记录。
+
+验收证据至少保留：成员读/写请求的状态码、搜索请求 URL 与响应总数、来源与身份状态截图、同步历史数量，以及 A4 全量测试命令输出。没有 PostgreSQL、Docker、真实上游或真实浏览器证据时，标为 `SKIPPED`，不能将静态代码检查当作部署通过。

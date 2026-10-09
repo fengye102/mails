@@ -1,4 +1,4 @@
-"""Local-only owner bootstrap: python -m mails_api.cli create-owner USERNAME."""
+"""Local-only owner/member bootstrap commands."""
 
 import argparse
 import getpass
@@ -17,6 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     owner_parser = commands.add_parser("create-owner")
     owner_parser.add_argument("username")
+    member_parser = commands.add_parser("create-member")
+    member_parser.add_argument("username")
     args = parser.parse_args(argv)
     if not args.username.strip() or len(args.username) > 128:
         print("Username must contain 1 to 128 characters.", file=sys.stderr)
@@ -24,8 +26,20 @@ def main(argv: list[str] | None = None) -> int:
     engine = create_engine(Settings().database_url)
     try:
         with Session(engine) as db:
-            if db.scalar(select(User).where(User.role == "owner")) is not None:
+            if (
+                args.command == "create-owner"
+                and db.scalar(select(User).where(User.role == "owner")) is not None
+            ):
                 print("An owner already exists.", file=sys.stderr)
+                return 1
+            if (
+                args.command == "create-member"
+                and db.scalar(select(User).where(User.role == "owner")) is None
+            ):
+                print("An owner is required before creating a member.", file=sys.stderr)
+                return 1
+            if db.scalar(select(User).where(User.username == args.username)) is not None:
+                print("That username already exists.", file=sys.stderr)
                 return 1
             password = getpass.getpass("Password: ")
             confirmation = getpass.getpass("Confirm password: ")
@@ -39,11 +53,11 @@ def main(argv: list[str] | None = None) -> int:
                 User(
                     username=args.username,
                     password_hash=hash_password(password),
-                    role="owner",
+                    role="owner" if args.command == "create-owner" else "member",
                 )
             )
             db.commit()
-        print("Owner created.")
+        print("Owner created." if args.command == "create-owner" else "Member created.")
         return 0
     finally:
         engine.dispose()

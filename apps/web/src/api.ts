@@ -30,6 +30,8 @@ export interface SyncRun {
 export interface Message {
   id: string;
   mailbox_id: string;
+  source_kind?: Connection["kind"];
+  identity_status?: "same_rfc_id" | "unverified";
   sender: string;
   recipient: string;
   subject: string;
@@ -42,6 +44,10 @@ export const providerLabels: Record<Connection["kind"], string> = {
   outlook_plus: "OutlookEmailPlus",
   cloudflare_temp_email: "Cloudflare 临时邮箱",
   cymail: "CYMail",
+};
+export const identityLabels: Record<NonNullable<Message["identity_status"]>, string> = {
+  same_rfc_id: "RFC Message-ID 相同（未合并）",
+  unverified: "身份未核对",
 };
 const errors: Record<string, string> = {
   UPSTREAM_UNAVAILABLE: "上游服务暂不可用，请稍后重试。",
