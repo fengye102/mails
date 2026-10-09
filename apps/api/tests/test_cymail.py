@@ -116,6 +116,42 @@ async def test_bad_item_isolated_with_absolute_issue_index():
 
 
 @pytest.mark.asyncio
+async def test_invalid_envelope_method_is_not_downgraded_to_item_issues():
+    def handler(request):
+        return envelope(
+            {
+                "account_id": ACCOUNT,
+                "alias": EMAIL,
+                "method": "unexpected",
+                "messages": [message()],
+            }
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderError) as raised:
+            await CYMailAdapter(client).list_messages(BASE_URL, KEY, MAILBOX_KEY)
+
+    assert raised.value.code == "UPSTREAM_CONTRACT"
+
+
+@pytest.mark.asyncio
+async def test_malformed_alias_item_is_contract_error():
+    def handler(request):
+        return envelope(
+            {
+                "account_id": ACCOUNT,
+                "aliases": [{"email": 123, "active": True}],
+            }
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderError) as raised:
+            await CYMailAdapter(client).check_mailbox(BASE_URL, KEY, MAILBOX_KEY)
+
+    assert raised.value.code == "UPSTREAM_CONTRACT"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status,body,code",
     [
