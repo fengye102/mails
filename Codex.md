@@ -17,6 +17,7 @@
 | `Codex.md` | 本文件；所有结构与工作流变更先改这里。 |
 | `README.md` | 面向使用者的项目简介、开发与部署入口。 |
 | `apps/api/` | Python API、数据库迁移、来源适配器及 API 单元测试。 |
+| `apps/api/src/mails_api/providers/` | 纯 HTTP 来源适配器和规范化 DTO；按来源 snake_case 命名，共享类型放 base.py；不存持久数据，测试缓存按任务完成后清理。 |
 | `apps/web/` | TypeScript 前端及其测试。 |
 | `tests/integration/` | 跨 API、数据库和来源模拟服务的集成测试。 |
 | `infra/` | Docker Compose、容器构建和部署配置模板。 |
