@@ -88,6 +88,8 @@ A1 的 API 路径统一以 `/api/v1` 开头：
 
 ## 8. 后续兼容边界
 
+2026-10-09 终审修订（A1 输入与持久化边界）：适配器拒绝包含 NUL 或非 UTF-8 可编码字符的文本，按固定 `UPSTREAM_CONTRACT` 逐封隔离。邮箱最终持久化失败时先回滚，再尽力以新事务写入 `failed`、固定 `SYNC_FAILED` 摘要和零新增计数；恢复写入失败不得覆盖原始持久化异常，数据库不可用期间不保证落盘。CLI 创建 owner 拒绝空口令及空白或超过 128 字符的用户名。连接 API 拒绝非可打印 ASCII、首尾空白的 API Key，以固定 422 错误响应且不回显。PostgreSQL 验收在迁移后、业务流程前反射检查主键、外键和列类型；缺少测试 PostgreSQL 时明确跳过，不以 SQLite 代替。
+
 A2 的 Cloudflare 和 A3 的 CYMail 适配器复用 `NormalizedMessage` 与同步流程，但各自实现鉴权、邮箱发现和分页。A1 不创建通用插件加载器；适配器以代码模块和显式工厂注册，避免在只有一个来源时引入动态插件系统。A4 再补团队成员权限、跨来源性能与运维完善。B 的公开用户和 C 的取件客户均不复用 A1 的管理会话。
 
 会话与 CSRF 的设计参考 [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) 和 [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)。

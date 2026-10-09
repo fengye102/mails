@@ -18,6 +18,9 @@ def main(argv: list[str] | None = None) -> int:
     owner_parser = commands.add_parser("create-owner")
     owner_parser.add_argument("username")
     args = parser.parse_args(argv)
+    if not args.username.strip() or len(args.username) > 128:
+        print("Username must contain 1 to 128 characters.", file=sys.stderr)
+        return 1
     engine = create_engine(Settings().database_url)
     try:
         with Session(engine) as db:
@@ -26,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             password = getpass.getpass("Password: ")
             confirmation = getpass.getpass("Confirm password: ")
+            if not password:
+                print("Password must not be empty.", file=sys.stderr)
+                return 1
             if password != confirmation:
                 print("Passwords do not match.", file=sys.stderr)
                 return 1

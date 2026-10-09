@@ -454,3 +454,113 @@ async def test_small_pool_released_during_http_and_scheduler_is_bounded(tmp_path
         with pytest.raises(asyncio.CancelledError):
             await pulse
         engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_text", ["body-private\x00", "body-private\ud800"])
+async def test_unpersistable_detail_is_partial_and_keeps_good(
+    db, mailbox, caplog, bad_text
+):
+    import json
+
+    import httpx
+    from mails_api.providers.outlook_plus import OutlookPlusAdapter
+    from mails_api.routes.sync_runs import run_payload
+
+    def upstream(request):
+        item = {
+            "id": "good",
+            "method": "graph",
+            "from_address": "sender",
+            "subject": "Code",
+            "content_preview": "preview",
+            "timestamp": NOW.timestamp(),
+        }
+        if request.url.path.endswith("/messages"):
+            data = {"emails": [{**item, "id": "bad"}, item]}
+        else:
+            bad = request.url.path.endswith("/bad")
+            data = {
+                **item,
+                "id": "bad" if bad else "good",
+                "to_address": "test@example.com",
+                "content": bad_text if bad else "verification code: 123456",
+                "raw_content": "",
+            }
+        # Escaped JSON permits a lone surrogate on the wire without encoding it here.
+        return httpx.Response(
+            200, content=json.dumps({"success": True, "code": "OK", "data": data})
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+        run = await sync_mailbox(
+            db, mailbox.id, OutlookPlusAdapter(client), NOW, encryption_key=KEY
+        )
+    assert run.status == "partial"
+    assert run.error_code == "UPSTREAM_CONTRACT"
+    assert run.new_message_count == 1
+    assert [m.provider_message_key for m in db.scalars(select(Message))] == [
+        "graph:good"
+    ]
+    stored = db.get(SyncRun, run.id)
+    assert stored.status == "partial"
+    assert db.get(Mailbox, mailbox.id).sync_state == "partial"
+    output = json.dumps(run_payload(run)) + stored.error_summary + caplog.text
+    assert "body-private" not in output and "credential-private" not in output
+
+
+@pytest.mark.asyncio
+async def test_final_commit_failure_recovers_safe_failed_run(
+    db, mailbox, monkeypatch, caplog
+):
+    from mails_api.routes.sync_runs import run_payload
+
+    mailbox_id = mailbox.id
+    commit = db.commit
+    calls = 0
+
+    def fail_final_commit():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            db.flush()
+            raise RuntimeError("body-private credential-private")
+        commit()
+
+    monkeypatch.setattr(db, "commit", fail_final_commit)
+    run = await sync_mailbox(db, mailbox_id, FakeAdapter(), NOW)
+    assert run.status == "failed" and run.error_code == "SYNC_FAILED"
+    assert run.finished_at is not None and run.new_message_count == 0
+    assert db.scalar(select(func.count(Message.id))) == 0
+    assert db.get(SyncRun, run.id).status == "failed"
+    assert db.get(Mailbox, mailbox_id).sync_state == "failed"
+    assert db.get(Mailbox, mailbox_id).last_synced_at is None
+    output = str(run_payload(run)) + run.error_summary + caplog.text
+    assert "body-private" not in output and "credential-private" not in output
+    assert (await sync_mailbox(db, mailbox_id, FakeAdapter(), NOW)).status == "success"
+
+
+@pytest.mark.asyncio
+async def test_failed_recovery_preserves_original_persistence_failure(
+    db, mailbox, monkeypatch
+):
+    mailbox_id = mailbox.id
+    commit = db.commit
+    original = RuntimeError("original persistence failure")
+    calls = 0
+
+    def fail_commits():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise original
+        if calls == 3:
+            raise ValueError("recovery failure")
+        commit()
+
+    monkeypatch.setattr(db, "commit", fail_commits)
+    with pytest.raises(RuntimeError) as caught:
+        await sync_mailbox(db, mailbox_id, FakeAdapter(), NOW)
+    assert caught.value is original
+    assert calls == 3
+    assert (await sync_mailbox(db, mailbox_id, FakeAdapter(), NOW)).status == "success"

@@ -26,6 +26,12 @@ def _text(data: dict, key: str, *, required: bool = False) -> str:
     value = data.get(key)
     if not isinstance(value, str) or (required and not value.strip()):
         raise _contract_error()
+    if "\x00" in value:
+        raise _contract_error()
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        raise _contract_error() from None
     return value
 
 

@@ -129,6 +129,8 @@ async def create_connection(
     origin = allowed_origin(body.base_url, request)
     key = encryption_key(request)
     secret = body.api_key.get_secret_value()
+    if secret != secret.strip() or any(not 32 <= ord(c) <= 126 for c in secret):
+        raise HTTPException(status_code=422, detail="API_KEY_INVALID")
     try:
         await adapter.probe(origin, secret)
     except ProviderError as exc:

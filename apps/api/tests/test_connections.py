@@ -29,7 +29,7 @@ def connected(engine):
 
     def upstream(request):
         state["requests"].append(request)
-        assert request.headers["X-API-Key"] == SECRET
+        assert request.headers["X-API-Key"] == state.get("expected_key", SECRET)
         if state["mode"] == "redirect":
             return httpx.Response(302, headers={"location": "https://attacker.test"})
         if state["mode"] == "auth":
@@ -310,3 +310,28 @@ def test_corrupt_secret_does_not_register_mailbox(connected, engine):
     )
     assert response.status_code == 503
     assert client.get("/api/v1/mailboxes").json() == []
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "private-密钥",
+        "private-\x00",
+        "private-\r\n",
+        "private-\x7f",
+        "private-\t",
+        " private-key",
+        "private-key ",
+    ],
+)
+def test_api_key_header_invalid_is_safe_422(connected, secret, caplog):
+    client, headers, state, _ = connected
+    state["expected_key"] = secret
+    response = client.post(
+        "/api/v1/connections", headers=headers, json={**BODY, "api_key": secret}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "API_KEY_INVALID"}
+    assert "private-" not in response.text + caplog.text
+    assert not state["requests"]
+    assert client.get("/api/v1/connections").json() == []

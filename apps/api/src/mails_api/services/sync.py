@@ -159,14 +159,34 @@ async def sync_mailbox(
             _record_error(run, _safe_code(exc))
         finally:
             try:
-                run.finished_at = utc_now()
-                mailbox = db.get(Mailbox, mailbox_id)
-                mailbox.sync_state = run.status
-                if run.status in {"success", "partial"}:
-                    mailbox.last_synced_at = now
-                db.add_all(messages)
-                run = db.merge(run)
-                db.commit()
+                run_id = run.id
+                try:
+                    run.finished_at = utc_now()
+                    mailbox = db.get(Mailbox, mailbox_id)
+                    mailbox.sync_state = run.status
+                    if run.status in {"success", "partial"}:
+                        mailbox.last_synced_at = now
+                    db.add_all(messages)
+                    run = db.merge(run)
+                    db.commit()
+                except Exception as persistence_error:  # noqa: BLE001 - best-effort safe status recovery
+                    try:
+                        db.rollback()
+                        # Reload the committed running row, never merge failed batch data.
+                        run = db.get(SyncRun, run_id)
+                        run.status = "failed"
+                        run.finished_at = utc_now()
+                        run.new_message_count = 0
+                        run.error_code = "SYNC_FAILED"
+                        run.error_summary = _SAFE_ERRORS["SYNC_FAILED"]
+                        db.get(Mailbox, mailbox_id).sync_state = "failed"
+                        db.commit()
+                    except Exception:  # noqa: BLE001 - never replace the original failure
+                        try:
+                            db.rollback()
+                        except Exception:  # noqa: BLE001, S110 - preserve original error without logging sensitive exceptions
+                            pass
+                        raise persistence_error from None
                 db.refresh(run)
                 db.expunge(run)
                 db.rollback()  # Return a loaded result without retaining a connection.
