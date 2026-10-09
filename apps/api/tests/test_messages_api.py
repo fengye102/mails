@@ -164,8 +164,8 @@ def test_query_source_kind_and_connection_filters(messages_client, engine):
             body_text="needle in body",
         )
         db.add(extra_mail)
-        extra_mail_id = extra_mail.id
         db.commit()
+        extra_mail_id = extra_mail.id
         connection_id = str(connection.id)
 
     response = messages_client.get(
