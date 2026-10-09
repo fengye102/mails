@@ -1,4 +1,4 @@
-# A1 部署与验收
+# A1/A2/A3 部署与验收
 
 ## 前置条件
 
@@ -12,7 +12,11 @@ Caddy 默认自动申请受信任证书，要求 DNS 指向服务器、443 可�
 
 1. 复制 `.env.example` 到 `.env`，权限 0600。用密码管理器生成高熵 DB 密码（推荐十六进制以避免 URI/Compose 转义），填入 POSTGRES_PASSWORD 和 MAILS_DATABASE_URL 的同一密码；DB 主机保持 `db`。主密钥是随机 32 字节的标准 Base64，例如在有 Python 的私有终端运行 `python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"`，直接存入密码管理器及受控配置，不进聊天/日志/Git。
 2. MAILS_PUBLIC_ORIGIN 必须精确等于浏览器 HTTPS origin（无路径/尾斜杠），MAILS_DOMAIN 是该主机名。MAILS_UPSTREAM_ORIGINS 是 JSON 字符串数组，显式列出 HTTPS 上游 origin；UI 输入与白名单精确匹配。不要使用通配符。
-3. 上游先完成邮箱授权，启用外部 API Key，将 allowed_emails 限定两个验收邮箱；上游公网模式按需允许 API 出口 IP。上游密钥只经本后台 HTTPS 连接表单登记，不放 URL。
+3. 上游先完成授权并准备机器凭据，随后在本后台连接页按来源登记：
+   - OutlookEmailPlus：外部 API Key；登记地址使用其 `account-status` 可读邮箱。
+   - Cloudflare Temp Email：`x-admin-auth` 管理 API 密钥；后台调用 `/admin/mails`，适配器在本地解析 RFC822。
+   - CYMail：内部 API Key；在连接的 `account_id` 字段填写账号 ID，再登记启用的 HME 别名。
+   三类密钥只经本后台 HTTPS 连接表单登记，不放 URL；API Key 不会出现在响应或日志中。
 4. 执行：
 
 ```sh
@@ -42,7 +46,7 @@ docker compose --env-file .env -f infra/compose.yaml run --rm --no-deps --user r
 
 - Compose ps：db/api 健康，web 运行；容器 build、重启后健康；宿主只监听 443，无 8000/5432/80。
 - 浏览器受信任 HTTPS 打开 Web；匿名 GET /api/v1/messages 返回 401；首次 owner 登录成功；登出或到期后失效；缺 CSRF 的写入为 403。
-- 对用户提供的私有 OutlookEmailPlus 实例登记连接和两个已授权邮箱；每个地址可读性通过。发一封单一 6 位验证码邮件，连续同步两次，只有一条且可复制。多候选验证码不猜测。
+- 分别登记 OutlookEmailPlus、Cloudflare Temp Email、CYMail 连接，并为每类来源登记至少一个可读邮箱；每个地址可读性通过。各来源各发一封单一 6 位验证码邮件，连续同步两次，统一收件箱中各只出现一条且可复制。多候选验证码不猜测。
 - 过滤邮箱、发件人、主题、时间；阅读纯文本；HTML/script 不执行；Graph/IMAP 身份切换不承诺跨方式去重。
 - 在测试上游制造超时、401/403、字段缺失；仅显示固定错误码，一个邮箱失败不破坏另一个。检查数据库密文及响应/日志无原密钥（不复制原值到工单）。
 - 在真实浏览器 360px 和桌面宽度检查登录、表单、收件箱、长主题阅读、复制与滚动；jsdom 测试不证明视觉布局。
