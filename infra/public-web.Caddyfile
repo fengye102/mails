@@ -1,0 +1,20 @@
+{
+    auto_https disable_redirects
+}
+
+{$PUBLIC_MAIL_DOMAIN} {
+    handle /public-api/* {
+        reverse_proxy public-api:8100
+        header Cache-Control "no-store"
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Cache-Control "no-store"
+    }
+}

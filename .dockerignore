@@ -1,3 +1,4 @@
+# Keep Docker build contexts limited to source and manifests.
 **
 !apps/
 !apps/api/
@@ -8,6 +9,21 @@
 !apps/api/alembic/**
 !apps/api/src/
 !apps/api/src/**
+!apps/public_api/
+!apps/public_api/pyproject.toml
+!apps/public_api/alembic.ini
+!apps/public_api/alembic/
+!apps/public_api/alembic/**
+!apps/public_api/src/
+!apps/public_api/src/**
+!apps/public_web/
+!apps/public_web/package.json
+!apps/public_web/package-lock.json
+!apps/public_web/index.html
+!apps/public_web/tsconfig.json
+!apps/public_web/vite.config.ts
+!apps/public_web/src/
+!apps/public_web/src/**
 !apps/web/
 !apps/web/package.json
 !apps/web/package-lock.json
@@ -18,5 +34,10 @@
 !apps/web/src/**
 !infra/
 !infra/Caddyfile
+!infra/*.Dockerfile
+!infra/*.Caddyfile
 **/__pycache__/
 **/*.pyc
+**/.venv/
+**/node_modules/
+**/dist/

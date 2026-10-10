@@ -1,0 +1,79 @@
+services:
+  public-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PUBLIC_MAIL_POSTGRES_DB:?required}
+      POSTGRES_USER: ${PUBLIC_MAIL_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${PUBLIC_MAIL_POSTGRES_PASSWORD:?required}
+    volumes:
+      - public_mail_pgdata:/var/lib/postgresql/data
+    networks:
+      - public_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  public-api:
+    build:
+      context: ..
+      dockerfile: infra/public-api.Dockerfile
+    restart: unless-stopped
+    environment:
+      PUBLIC_MAIL_DATABASE_URL: ${PUBLIC_MAIL_DATABASE_URL:?required}
+      PUBLIC_MAIL_ENCRYPTION_KEY: ${PUBLIC_MAIL_ENCRYPTION_KEY:?required}
+      PUBLIC_MAIL_PUBLIC_ORIGIN: ${PUBLIC_MAIL_PUBLIC_ORIGIN:?required}
+      PUBLIC_MAIL_UPSTREAM_URL: ${PUBLIC_MAIL_UPSTREAM_URL:?required}
+      PUBLIC_MAIL_ADMIN_KEY: ${PUBLIC_MAIL_ADMIN_KEY:?required}
+      PUBLIC_MAIL_ALLOWED_ORIGINS: ${PUBLIC_MAIL_ALLOWED_ORIGINS:?required}
+      PUBLIC_MAIL_COOKIE_SECURE: ${PUBLIC_MAIL_COOKIE_SECURE:-true}
+      PUBLIC_MAIL_TTL_SECONDS: ${PUBLIC_MAIL_TTL_SECONDS:-86400}
+      PUBLIC_MAIL_TURNSTILE_SECRET: ${PUBLIC_MAIL_TURNSTILE_SECRET:-}
+    depends_on:
+      public-db:
+        condition: service_healthy
+    networks:
+      - public_internal
+    expose:
+      - "8100"
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn public_mail_api.main:app --host 0.0.0.0 --port 8100 --workers 1 --no-proxy-headers --no-access-log"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  public-web:
+    build:
+      context: ..
+      dockerfile: infra/public-web.Dockerfile
+    restart: unless-stopped
+    environment:
+      PUBLIC_MAIL_DOMAIN: ${PUBLIC_MAIL_DOMAIN:?required}
+    ports:
+      - "${PUBLIC_MAIL_HTTPS_PORT:-443}:443"
+    depends_on:
+      public-api:
+        condition: service_healthy
+    networks:
+      - public_internal
+    volumes:
+      - public_caddy_data:/data
+      - public_caddy_config:/config
+
+networks:
+  # Dedicated to B1, separate from the private Compose project's network.
+  # Not marked `internal`: the API needs outbound HTTPS to Cloudflare and Caddy
+  # needs outbound ACME access for certificates.
+  public_internal:
+    name: mails_public_internal
+
+volumes:
+  public_mail_pgdata:
+    name: mails_public_mail_pgdata
+  public_caddy_data:
+    name: mails_public_caddy_data
+  public_caddy_config:
+    name: mails_public_caddy_config

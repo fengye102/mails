@@ -75,3 +75,16 @@
 - `tests/integration/` 使用 conftest.py 与 test_*.py；仅销毁显式配置的 mails_test 前缀 PostgreSQL 数据库中的测试表，测试后清理连接与测试 schema。
 - `docs/runbooks/` 使用小写 kebab-case.md；保留部署、恢复和验收步骤，过期步骤由更新替代；备份及密钥不得存于此目录。
 - 根目录 `.dockerignore` 限制 Docker 构建上下文，`.env.example` 仅放占位值。
+
+## B1 公开临时邮箱目录约定
+- `apps/public_api/`：B1 独立 FastAPI 服务、独立数据库模型、公共 Cloudflare 来源适配器和测试；不导入 `apps/api` 的 A 私有模型或会话。
+- `apps/public_web/`：B1 独立公开页面源码与测试；不复用 A 管理后台会话状态。
+- `infra/public-api.Dockerfile`、`infra/public-web.Dockerfile`、`infra/public-web.Caddyfile`、`infra/public-compose.yaml`：B1 容器构建、静态服务和独立部署模板；运行数据只进独立 PostgreSQL 命名卷。
+- `docs/superpowers/specs/`、`docs/superpowers/plans/`：B1 规格和计划；B1 结束后保留设计记录。B1 测试缓存和虚拟环境按现有清理规则处理。
+- B1 不新增顶层运行数据目录；公共邮箱和能力令牌属于持久敏感数据，仅存 B1 数据库。
+
+## C 库存与取件交付目录约定
+- `apps/delivery_api/`：C 阶段独立库存、分配、取件码和审计服务；不得导入 A/B1 的应用包或数据库模型。
+- `infra/delivery-*.Dockerfile`、`infra/delivery-compose.yaml`：C 独立容器与数据库部署；不把 C 运行数据并入 A/B1 卷。
+- `docs/superpowers/specs/`、`docs/superpowers/plans/`：C 设计和实施记录；实现前必须先更新对应文档。
+- `docs/runbooks/delivery-mail.md`：C 部署、密钥轮换、库存回收和取件验收；明文取件码不写入日志或文档。
