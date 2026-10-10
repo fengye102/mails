@@ -54,3 +54,12 @@ docker compose --env-file .env -f infra/compose.yaml exec api python -m mails_ap
 ```
 
 唯一宿主端口是 TCP 443。详见运行手册的 TLS 前置条件、私网准入、备份及真实实例验收表。A1/A2/A3 代码阶段尚不等于生产验收完成：当前 Windows 执行环境缺 Docker/PostgreSQL/真实上游实例，相关检查待部署主机执行。
+
+## B1 / C 阶段
+
+- [B1 公开临时邮箱设计](docs/superpowers/specs/2026-10-10-phase-b1-public-mail-design.md)
+- [B1 公开邮箱运行手册](docs/runbooks/public-mail.md)
+- [C 交付设计](docs/superpowers/specs/2026-10-10-phase-c-mail-delivery-design.md)
+- [C 交付运行手册](docs/runbooks/delivery-mail.md)
+
+B1 与 C 均使用独立服务、数据库、网络和密钥。当前源码测试可在 Windows 执行；Docker、PostgreSQL、HTTPS 和真实上游联调因环境缺失标记为 skipped。

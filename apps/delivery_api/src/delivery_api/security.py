@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import os
+from html.parser import HTMLParser
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -27,4 +28,30 @@ def encrypt_value(key_text: str, value: str) -> bytes:
         raise ValueError("DELIVERY_ENCRYPTION_KEY must decode to 32 bytes")
     nonce = os.urandom(12)
     return nonce + AESGCM(key).encrypt(nonce, value.encode(), None)
+
+
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.ignored = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {"script", "style"}:
+            self.ignored += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"script", "style"} and self.ignored:
+            self.ignored -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self.ignored:
+            self.parts.append(data)
+
+
+def plain_text(value: str) -> str:
+    parser = _TextParser()
+    parser.feed(value)
+    parser.close()
+    return " ".join(" ".join(parser.parts).split())
 

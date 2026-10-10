@@ -88,3 +88,5 @@
 - `infra/delivery-*.Dockerfile`、`infra/delivery-compose.yaml`：C 独立容器与数据库部署；不把 C 运行数据并入 A/B1 卷。
 - `docs/superpowers/specs/`、`docs/superpowers/plans/`：C 设计和实施记录；实现前必须先更新对应文档。
 - `docs/runbooks/delivery-mail.md`：C 部署、密钥轮换、库存回收和取件验收；明文取件码不写入日志或文档。
+- `infra/delivery-api.Dockerfile`、`infra/delivery-compose.yaml`：C 独立容器与 PostgreSQL 部署模板；不与 A/B1 卷、网络、密钥混用。
+- `.env.delivery.example`：C 环境变量占位模板；真实 operator token、加密密钥和数据库密码不入库。

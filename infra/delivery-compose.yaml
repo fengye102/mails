@@ -1,0 +1,43 @@
+services:
+  delivery-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DELIVERY_POSTGRES_DB:?required}
+      POSTGRES_USER: ${DELIVERY_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${DELIVERY_POSTGRES_PASSWORD:?required}
+    volumes:
+      - delivery_pgdata:/var/lib/postgresql/data
+    networks: [delivery_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  delivery-api:
+    build:
+      context: ..
+      dockerfile: infra/delivery-api.Dockerfile
+    restart: unless-stopped
+    environment:
+      DELIVERY_DATABASE_URL: ${DELIVERY_DATABASE_URL:?required}
+      DELIVERY_OPERATOR_TOKEN: ${DELIVERY_OPERATOR_TOKEN:?required}
+      DELIVERY_ENCRYPTION_KEY: ${DELIVERY_ENCRYPTION_KEY:?required}
+      DELIVERY_PICKUP_TTL_SECONDS: ${DELIVERY_PICKUP_TTL_SECONDS:-900}
+      DELIVERY_SESSION_TTL_SECONDS: ${DELIVERY_SESSION_TTL_SECONDS:-1800}
+    depends_on:
+      delivery-db:
+        condition: service_healthy
+    networks: [delivery_internal]
+    expose: ["8200"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+networks:
+  delivery_internal:
+    name: mails_delivery_internal
+volumes:
+  delivery_pgdata:
+    name: mails_delivery_pgdata

@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.public.example
+!.env.delivery.example
 .venv/
 .superpowers/
 __pycache__/
@@ -18,3 +19,5 @@ data/
 *.log
 *.sqlite3
 *.db
+
+_publish/

@@ -24,6 +24,13 @@
 !apps/public_web/vite.config.ts
 !apps/public_web/src/
 !apps/public_web/src/**
+!apps/delivery_api/
+!apps/delivery_api/pyproject.toml
+!apps/delivery_api/alembic.ini
+!apps/delivery_api/alembic/
+!apps/delivery_api/alembic/**
+!apps/delivery_api/src/
+!apps/delivery_api/src/**
 !apps/web/
 !apps/web/package.json
 !apps/web/package-lock.json
