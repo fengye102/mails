@@ -110,6 +110,7 @@
   （取自 `GET /api/csrf-token`；该端点会轮换会话 Cookie，必须把响应 Cookie 带回写请求）。本仓库的
   连接 `secret` 用**对外 API Key**：读链路走 `X-API-Key`（`/api/external/*`），管理链路拿它当登录口令
   换会话。因此 OEP 侧需挂本地补丁 `patches/crypto.py`（对外 API Key 可通过密码校验），否则管理链路 401。
+  补丁生成脚本、应用步骤与验收清单随仓库存档在 `integrations/outlook-email-plus/`（OEP 下线后可整目录删除）。
 - `outlook_plus` 分页：`page_size` 上限 100，**页码越界会被上游夹回最后一页**（不是返回空页），结束条件
   必须用 `pagination.total_count`；靠「返回不足一页」判断会无限翻页（账号数恰好是页大小整数倍时必踩）。
 - 适配器只映射固定错误码；上游 message 原文、登录口令、会话 Cookie、导出内容都不得进日志或响应体。

@@ -1,0 +1,52 @@
+--- /opt/outlook-email-plus/patches/backup-v2.9.10/crypto.py	2026-08-17 17:23:53.000000000 +0800
++++ /opt/outlook-email-plus/patches/crypto.py	2026-10-11 22:00:20.545916328 +0800
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import base64
++import secrets
+ from typing import Optional
+ 
+ import bcrypt
+@@ -20,14 +21,38 @@
+     return hashed.decode("utf-8")
+ 
+ 
+-def verify_password(password: str, hashed: str) -> bool:
+-    """验证密码是否匹配哈希值"""
++def _machine_api_key_matches(password: str) -> bool:
++    """本地补丁（非上游代码）：对外 API Key 可作为机器调用的“密码”。
++
++    mails 后台等自动化只持有一把对外 API Key：用它走 /api/external/*（X-API-Key 头），
++    也用它登录会话型管理接口（/login、导出二次验证）。仅在 Key 已配置且完全匹配时返回 True。
++    """
++    provided = (password or "").strip()
++    if not provided:
++        return False
+     try:
+-        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
++        from outlook_web.repositories import external_api_keys as external_api_keys_repo
++        from outlook_web.repositories import settings as settings_repo
++
++        configured_key = settings_repo.get_external_api_key()
++        if configured_key and secrets.compare_digest(provided, str(configured_key)):
++            return True
++        return bool(external_api_keys_repo.find_external_api_key_by_plaintext(provided))
+     except Exception:
+         return False
+ 
+ 
++def verify_password(password: str, hashed: str) -> bool:
++    """验证密码是否匹配哈希值（本地补丁：追加对外 API Key 兜底）"""
++    try:
++        if bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8")):
++            return True
++    except Exception:
++        pass
++    # 本地补丁新增：对外 API Key 等价于机器管理员凭据
++    return _machine_api_key_matches(password)
++
++
+ def is_password_hashed(password: str) -> bool:
+     """检查密码是否已经是 bcrypt 哈希值"""
+     return password.startswith("$2b$") or password.startswith("$2a$") or password.startswith("$2y$")
