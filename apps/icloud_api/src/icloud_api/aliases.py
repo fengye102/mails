@@ -23,7 +23,7 @@ RETRY_DELAYS = (timedelta(seconds=1), timedelta(milliseconds=2500), timedelta(se
 _DATE_ONLY = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _NAIVE_SECOND = re.compile(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$")
 _ISO_OFFSET = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})$"
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})$"
 )
 _DURATION = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$")
 _INT64_MAX = 2**63 - 1

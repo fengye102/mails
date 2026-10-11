@@ -77,6 +77,14 @@ CYMail 是 iCloud 隐藏邮箱引擎（建/停/删别名、Apple 登录、收信
 - `GET /icloud-api/v1/scheduler/jobs`、`POST .../jobs/{id}/{enable|disable}`：定时创建开关（默认关）。
 - `GET /icloud-api/v1/health`、`GET /icloud-api/v1/capabilities`。
 
+`/capabilities` 的每个能力上报两个字段：`shipped`（代码已落地，有测试覆盖）与
+`verified_live`（已在真实 Apple 账号上跑通）。未落地的链路 `shipped: false`；
+未上真机验证的链路 `verified_live: false`——调用方据此决定是否先走假上游或降级路径，
+不要只看 `shipped` 就当线上可用。`verified_live` 只能是 `shipped` 的子集（有测试守着）。
+
+上游协议细节（端点、查询参数、Cookie/WebAuth 头、429/409/421 语义）按 CYMail 的 Go 实现照搬，
+见 `apps/icloud_api/src/icloud_api/hme_client.py` 顶部说明；`mail/netease_web_client.go`（163 网页）不移植。
+
 管理接口（`icloud_web` 用）：账号增删、App Password 写入、浏览器授权发起/状态、调度参数编辑。
 授权回填走公开路由：`POST /icloud-api/public/browser-auth/complete`（一次性授权码，TTL 5 分钟）。
 

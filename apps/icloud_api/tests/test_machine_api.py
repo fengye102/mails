@@ -17,12 +17,22 @@ def test_capabilities_report_only_shipped_features(client) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["features"]["apple_srp_login"] is True
+    features = body["features"]
+    assert features["aliases_read"] == {"shipped": True, "verified_live": False}
+    assert features["apple_srp_login"]["shipped"] is True
     # 没收信、没写别名、没授权、没调度，就不能对外声称可用。
-    for name in ("aliases_read", "aliases_write", "mail_imap", "mail_web", "browser_auth", "scheduler"):
-        assert body["features"][name] is False, name
-    assert body["features"]["mail_netease_web"] is False
+    for name in ("aliases_write", "mail_imap", "mail_web", "browser_auth", "scheduler", "mail_netease_web"):
+        assert features[name]["shipped"] is False, name
+    # 还没上真机：任何链路都不能声称已在真实账号验证过。
+    assert all(not state["verified_live"] for state in features.values())
     assert body["limits"]["scheduler_default_enabled"] is False
+
+
+def test_live_verified_features_must_be_a_subset_of_shipped() -> None:
+    from icloud_api.routes.machine import LIVE_VERIFIED_FEATURES, SHIPPED_FEATURES
+
+    # 真机验证过的链路必然也是已落地的；写反了就是谎报能力。
+    assert LIVE_VERIFIED_FEATURES <= set(SHIPPED_FEATURES)
 
 
 def test_missing_operator_token_is_a_service_error(settings, engine) -> None:
