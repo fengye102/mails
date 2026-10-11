@@ -155,3 +155,134 @@ it("searches across message text and filters by source", async () => {
     screen.getByText((text) => text.includes("RFC Message-ID 相同（未合并）")),
   ).toBeVisible();
 });
+
+it("reads mail straight from an upstream source without registering a mailbox", async () => {
+  const copy = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: copy },
+  });
+  const request = vi.fn(async (path: string) => {
+    if (path.includes("/live-mail/detail"))
+      return new Response(
+        JSON.stringify({
+          id: "graph:9",
+          subject: "验证码",
+          sender: "no-reply@example.com",
+          recipient: "user@outlook.com",
+          received_at: "2026-07-09T06:32:10+00:00",
+          verification_code: "654321",
+          body_text: "验证码 654321",
+          link: "https://openxlab.org.cn/activate?token=abc",
+        }),
+      );
+    if (path.includes("/live-mail?"))
+      return new Response(
+        JSON.stringify({
+          total: 1,
+          items: [
+            {
+              provider_key: "graph:9",
+              source_kind: "outlook_plus",
+              sender: "no-reply@example.com",
+              subject: "验证码",
+              snippet: "请查看正文",
+              received_at: "2026-07-09T06:32:10+00:00",
+              verification_code: "654321",
+            },
+          ],
+        }),
+      );
+    if (path.includes("/sources/outlook_plus/"))
+      return new Response(
+        JSON.stringify([
+          { provider_key: "user@outlook.com", address: "user@outlook.com" },
+        ]),
+      );
+    if (path.includes("/connections"))
+      return new Response(
+        JSON.stringify([
+          {
+            id: "c1",
+            kind: "outlook_plus",
+            name: "Outlook 池",
+            base_url: "https://mail.example",
+            status: "active",
+            last_error: null,
+            last_checked_at: null,
+          },
+        ]),
+      );
+    if (path.includes("/mailboxes")) return new Response(JSON.stringify([]));
+    return new Response(JSON.stringify({ items: [], total: 0 }));
+  });
+  vi.stubGlobal("fetch", request);
+  render(<Inbox />);
+
+  fireEvent.click(await screen.findByRole("tab", { name: "上游实时" }));
+  await waitFor(() =>
+    expect(
+      request.mock.calls.some((call) =>
+        String(call[0]).includes("/sources/outlook_plus/c1/items"),
+      ),
+    ).toBe(true),
+  );
+  fireEvent.change(screen.getByLabelText("邮箱地址"), {
+    target: { value: "user@outlook.com" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "读取邮件" }));
+
+  expect(await screen.findByText("654321")).toBeVisible();
+  const listUrl = request.mock.calls
+    .map((call) => String(call[0]))
+    .find((path) => path.includes("/live-mail?"))!;
+  expect(listUrl).toContain("address=user%40outlook.com");
+  expect(listUrl).toContain("limit=50");
+
+  fireEvent.click(screen.getByRole("button", { name: "验证码" }));
+  expect(await screen.findByText("验证码 654321")).toBeVisible();
+  expect(
+    request.mock.calls.some((call) =>
+      String(call[0]).includes("/live-mail/detail"),
+    ),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "复制验证码" }));
+  expect(await screen.findByText("验证码已复制")).toBeVisible();
+  expect(copy).toHaveBeenCalledWith("654321");
+  // 链接型激活邮件：纯文本阅读策略下把链接单独暴露出来
+  const link = screen.getByRole("link", {
+    name: "https://openxlab.org.cn/activate?token=abc",
+  });
+  expect(link).toHaveAttribute("target", "_blank");
+  fireEvent.click(screen.getByRole("button", { name: "复制链接" }));
+  await waitFor(() =>
+    expect(copy).toHaveBeenCalledWith(
+      "https://openxlab.org.cn/activate?token=abc",
+    ),
+  );
+});
+
+it("asks for a source connection before reading upstream mail", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (path: string) =>
+        new Response(
+          JSON.stringify(
+            path.includes("/connections") || path.includes("/mailboxes")
+              ? []
+              : { items: [], total: 0 },
+          ),
+        ),
+    ),
+  );
+  render(<Inbox />);
+  fireEvent.click(await screen.findByRole("tab", { name: "上游实时" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "读取邮件" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "读取邮件" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "请先选择一个来源连接。",
+  );
+});

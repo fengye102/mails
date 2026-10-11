@@ -39,7 +39,18 @@ export interface Message {
   received_at: string;
   verification_code: string | null;
   body_text?: string;
+  link?: string | null;
 }
+export interface LiveMessage {
+  provider_key: string;
+  source_kind: Connection["kind"];
+  sender: string;
+  subject: string;
+  snippet: string;
+  received_at: string;
+  verification_code: string | null;
+}
+
 export const providerLabels: Record<Connection["kind"], string> = {
   outlook_plus: "OutlookEmailPlus",
   cloudflare_temp_email: "Cloudflare 临时邮箱",
@@ -68,6 +79,9 @@ const errors: Record<string, string> = {
   SOURCE_CONFLICT: "上游状态冲突，请刷新后重试。",
   SOURCE_REJECTED: "上游拒绝了该操作，请检查参数或来源开关。",
   CONNECTION_NOT_FOUND: "该来源连接不存在，请刷新页面。",
+  CONNECTION_SECRET_INVALID: "连接凭据无法解密，请重新填写密钥。",
+  LIVE_MESSAGE_NOT_FOUND: "该邮件在上游已不存在，请重新读取。",
+  CYMAIL_ACCOUNT_ID_REQUIRED: "该 CYMail 连接缺少 account_id 配置，请先补全。",
   UNSUPPORTED_PROVIDER_KIND: "不支持的来源类型。",
 };
 export function errorText(code: string | null | undefined) {

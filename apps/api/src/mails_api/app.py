@@ -10,6 +10,7 @@ from sqlalchemy import Engine, create_engine
 from starlette.responses import JSONResponse
 
 from mails_api.routes.connections import router as connections_router
+from mails_api.routes.live_mail import router as live_mail_router
 from mails_api.routes.mailboxes import router as mailboxes_router
 from mails_api.routes.messages import router as messages_router
 from mails_api.routes.session import router as session_router
@@ -41,6 +42,7 @@ def create_app(
     app.include_router(connections_router)
     app.include_router(mailboxes_router)
     app.include_router(messages_router)
+    app.include_router(live_mail_router)
     app.include_router(source_cymail_router)
     app.include_router(source_cloudflare_temp_email_router)
     app.include_router(source_outlook_plus_router)

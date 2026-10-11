@@ -114,3 +114,23 @@
 - `outlook_plus` 分页：`page_size` 上限 100，**页码越界会被上游夹回最后一页**（不是返回空页），结束条件
   必须用 `pagination.total_count`；靠「返回不足一页」判断会无限翻页（账号数恰好是页大小整数倍时必踩）。
 - 适配器只映射固定错误码；上游 message 原文、登录口令、会话 Cookie、导出内容都不得进日志或响应体。
+
+## 统一收件箱的实时读信（三来源合一）
+
+- 路由：`GET /api/v1/connections/{connection_id}/live-mail`（列表，`address` 必填，可选
+  `query` / `limit` / `offset`）与 `GET .../live-mail/detail`（`address` + `key` 必填）。
+  两者只读，统一要求登录成员（`require_member`），不写入任何状态、不改变上游邮箱。
+- 读契约复用 `providers.*`：与定时同步同一套解析，所以「实时看到的」与「归档下来的」
+  字段永远一致。列表项：`provider_key` / `source_kind` / `sender` / `subject` /
+  `snippet` / `received_at` / `verification_code`；详情另加 `recipient` /
+  `rfc_message_id` / `body_text` / `link`。上游单条解析失败以 `issues[].code` 回报，
+  不隐藏、不猜测。
+- CYMail 按「账号 + 别名」寻址：连接必须带 `config.account_id`，缺失即
+  `422 CYMAIL_ACCOUNT_ID_REQUIRED`；它的上游只有 `preview`，因此详情正文等同摘要
+  （不假装存在正文）。
+- 正文一律纯文本：`services.htmltext` 在 provider 层把上游 HTML 转成文本，`<script>`、
+  `<style>`、图片与 `mailto:` 链接一律丢弃。**超链接的 http(s) 目标以 `文字 (URL)`
+  形式保留**——激活类邮件只给链接，丢掉目标等于把邮件变成废纸；`link` 字段返回正文里
+  第一个 http(s) 链接（本地归档的详情同样返回），供前端点击或复制。
+- 关键词过滤在服务端按「发件人 + 主题 + 摘要」做本地子串匹配：三家上游都没有通用搜索接口。
+- 上游错误码原样映射为 502；连接凭据只用于向上游取数，绝不进响应体、日志与异常消息。

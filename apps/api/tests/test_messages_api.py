@@ -89,7 +89,8 @@ def test_private_summaries_and_plain_text_detail(messages_client):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
     detail = response.json()
-    assert set(detail) == set(item) | {"body_text"}
+    assert set(detail) == set(item) | {"body_text", "link"}
+    assert detail["link"] is None  # 纯文本正文里没有链接
     assert (
         detail["body_text"] == 'Verification code: 123456\n<script>alert("x")</script>'
     )

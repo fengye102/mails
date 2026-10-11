@@ -30,3 +30,18 @@ def extract_code(subject: str, body_text: str) -> str | None:
                 return None
             candidates.update(values)
     return next(iter(candidates)) if len(candidates) == 1 else None
+
+_URL = re.compile(r"""https?://[^\s<>"'　()（）【】]+""")
+
+
+def extract_link(subject: str, body_text: str) -> str | None:
+    """取正文（其次主题）里第一个 http(s) 链接。
+
+    纯文本阅读策略下这是用户唯一能点/能复制的行动线索（激活、重置密码等）；
+    链接末尾的分隔标点与 HTML 转换补上的括号会被裁掉。
+    """
+    for text in (body_text, subject):
+        match = _URL.search(text or "")
+        if match is not None:
+            return match.group(0).rstrip(".,;:!?)]}'\"”、。，；：！？）】")
+    return None

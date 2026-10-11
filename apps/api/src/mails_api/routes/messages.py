@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from mails_api.db import get_db
 from mails_api.models import Mailbox, Message, ProviderConnection
 from mails_api.security.csrf import require_member
+from mails_api.services.extract import extract_link
 from mails_api.services.identity import identity_statuses
 from pydantic import AwareDatetime
 from sqlalchemy import func, or_, select
@@ -138,4 +139,5 @@ def get_message(message_id: UUID, db: Annotated[DbSession, Depends(get_db)]) -> 
     return {
         **message_payload(message, source_kind or "unknown", statuses[message.id]),
         "body_text": message.body_text,
+        "link": extract_link(message.subject, message.body_text),
     }

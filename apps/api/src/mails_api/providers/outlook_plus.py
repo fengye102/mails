@@ -16,6 +16,13 @@ from mails_api.providers.base import (
     NormalizedMessage,
     ProviderError,
 )
+from mails_api.services.htmltext import html_to_text, looks_like_html
+
+
+def _plain_body(data: dict) -> str:
+    """OEP 的 ``content`` 实测是整页 HTML；阅读器与归档只接受纯文本。"""
+    body = _text(data, "content")
+    return html_to_text(body) if looks_like_html(body) else body
 
 
 def _contract_error() -> ProviderError:
@@ -200,6 +207,6 @@ class OutlookPlusAdapter:
             snippet=detail.snippet,
             received_at=detail.received_at,
             recipient=_text(data, "to_address"),
-            body_text=_text(data, "content"),
+            body_text=_plain_body(data),
             rfc_message_id=_rfc_message_id(_text(data, "raw_content")),
         )

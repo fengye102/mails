@@ -1,5 +1,5 @@
 import pytest
-from mails_api.services.extract import extract_code
+from mails_api.services.extract import extract_code, extract_link
 
 
 @pytest.mark.parametrize(
@@ -42,3 +42,19 @@ def test_chinese_context_without_ascii_separator(subject, body, expected):
 )
 def test_conflicts_and_unrelated_clauses_are_not_codes(subject, body):
     assert extract_code(subject, body) is None
+
+
+def test_extract_link_prefers_body_and_trims_trailing_punctuation():
+    body = "请点击激活 Activate (https://openxlab.org.cn/mails/activate?token=abc123)."
+    assert (
+        extract_link("注册激活", body)
+        == "https://openxlab.org.cn/mails/activate?token=abc123"
+    )
+
+
+def test_extract_link_falls_back_to_subject_and_ignores_non_http():
+    assert extract_link("http://example.com/reset", "无链接正文") == (
+        "http://example.com/reset"
+    )
+    assert extract_link("账单", "没有链接，也没有 ftp://example.com") is None
+    assert extract_link("", "") is None
