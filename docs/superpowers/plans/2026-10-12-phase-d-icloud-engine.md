@@ -65,5 +65,12 @@ apps/delivery_api/.venv/bin/ruff check --output-format=concise apps/icloud_api/
   （RFC1123Z 解析自己的 RFC3339 输出）从未生效，Python 版按本意实现并在测试固定；
   **IDLE 路由未暴露**（idle.py 就绪，等待 D4/D5 的常驻摄入入口）。
   `mail/web.py`（iCloud web 收信回退）未移植，`mail_web` 保持 shipped=false。
-- 待施工：D2 余下部分（`apple_login.py` SRP 登录会话、`apple_auth_legacy.py` 旧登录回退）、
+- 待施工：D2 余下部分（`apple_auth_legacy.py` 旧登录回退）、
   D3 余下部分（`mail/web.py` 回退 + IDLE 摄入路由）、D4 写操作与调度、D5 平台接线。
+- 2026-10-12：D2 SRP 登录会话完成：`apple_login.py`（对应 Go `apple_srp_login.go` 751 行：
+  门户预热 → authStart（捕获 hashcash 挑战）→ 设备密钥挑战 → federate → SRP signin/init+complete
+  （s2k/s2k_fo 派生，`no_user_name_in_x`）→ 2FA（OTPProvider + 2sv/trust）→ 管理门户 scnt+apiKey；
+  含域切换重试、403/412/401/409 语义、X-Apple-HC hashcash、FD-Client-Info 指纹头完整移植）。
+  测试 7 例（假 idmsa/管理服务按 Go mock 形状）：完整 2FA 序列、无 2FA、密码错误、
+  缺 OTPProvider、2FA 失败、hashcash 难度、参数校验。全套 192 通过 + ruff 干净。
+  真实 idmsa.apple.com 登录待账号（verified_live 仍为 false）。
