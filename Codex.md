@@ -8,7 +8,9 @@
 - B：公开临时邮箱。开放注册、域名与地址配额、滥用控制；与 A 的私人凭据隔离。
 - C：库存与取件交付。分配邮箱、签发取件码、设置有效期并留存操作记录。
 
-当前只实施 A。B、C 的设计可以在文档中预留边界，不得提前实现其业务功能。
+- 当前状态：A、B1、C 已实施（C 含取件交付统一，见阶段 C2）；阶段 D（iCloud 引擎）与 E（邮箱池）实施中。
+- D：iCloud 隐藏邮箱引擎。承接 CYMail 的别名、Apple 会话、收信与定时创建能力，独立服务。
+- E：邮箱池。在 C 内提供对外领取/释放/回传与取码能力，供注册机接入（承接 OEP 对外契约）。
 
 ## 仓库结构
 
@@ -152,3 +154,29 @@
   第一个 http(s) 链接（本地归档的详情同样返回），供前端点击或复制。
 - 关键词过滤在服务端按「发件人 + 主题 + 摘要」做本地子串匹配：三家上游都没有通用搜索接口。
 - 上游错误码原样映射为 502；连接凭据只用于向上游取数，绝不进响应体、日志与异常消息。
+
+## D 阶段目录约定（iCloud 引擎）
+
+- `apps/icloud_api/`：独立 FastAPI 服务，承接 CYMail 的 iCloud 隐藏邮箱引擎（别名、Apple 账号会话、
+  收信、限速、浏览器授权、定时创建）；独立 PostgreSQL，不导入 A/C 的模型。
+- `apps/icloud_api/src/icloud_api/`：按 CYMail 的 Go 包逐文件对应移植——
+  `srp/*`→`srp/`、`hme/client.go`→`aliases.py`、`hme/apple_srp_login.go`→`apple_login.py`、
+  `hme/apple_account.go`→`apple_account.py`、`hme/auth.go`→`apple_auth_legacy.py`、
+  `mail/{client,idle,date,web_client}.go`→`mail/{imap,idle,date,web}.py`、
+  `account/manager.go`→`accounts.py`、`server/alias_rate_limiter.go`→`rate_limit.py`、
+  `server/browser_auth.go`→`browser_auth.py`、`server/scheduler.go`→`scheduler.py`、
+  `server/server.go` 的创建回退逻辑→`alias_service.py`。
+  算法、常量、端点路径与错误码按原实现，不重新设计；`mail/netease_web_client.go`（163 网页）不移植。
+- `apps/icloud_web/`：账号接入、别名管理、浏览器授权、定时创建开关（默认关闭）。
+- `infra/icloud-api.Dockerfile`、`infra/icloud-compose.yaml`：与 C 同构（独立库、只绑 127.0.0.1、迁移随启动执行）。
+- 引擎对外：机器接口 `/icloud-api/v1/*`（Bearer 运营 token）给 A/C/注册机；
+  管理接口 `/icloud-api/admin/*`（登录会话 + CSRF）给 `icloud_web`；
+  授权回填走公开路由 `/icloud-api/public/browser-auth/complete`（一次性授权码，TTL 5 分钟）。
+
+## E 阶段目录约定（邮箱池，供注册机）
+
+- 池能力并入 C（`apps/delivery_api`），不新增服务：库存已是唯一真相来源，池只是「带租约的分配」。
+- 新增 `apps/delivery_api/src/delivery_api/pool.py`、`routes/pool.py`，迁移 `0003_pool_api_keys.py`。
+- 对外契约沿用 OEP `/api/external/pool/*` 的路径与字段，注册机零改动切换；
+  平台侧前缀为 `/pool-api/v1/*`（nginx 直连 C，保留真实 IP）。
+- Key 只存摘要，明文只在创建响应出现一次；租约到期自动回收，回收后进冷却期。
