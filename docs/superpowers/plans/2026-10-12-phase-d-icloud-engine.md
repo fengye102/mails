@@ -54,5 +54,16 @@ apps/delivery_api/.venv/bin/ruff check --output-format=concise apps/icloud_api/
 - 2026-10-12：D2 浏览器授权完成（`iba_` 一次性码、TTL 5 分钟、单次消费、回填校验后落库、
   状态查询、账号增删；163 收件箱网页授权不移植）。管理接口暂用运营 token 守卫，
   登录会话 + CSRF 随 `icloud_web` 在 D5 落地——**这是目前唯一已知的临时鉴权**，D5 必须替换。
+- 2026-10-12：**施工顺序调整**：D3（IMAP 收信）先于 D2 余下部分（SRP 登录会话）——
+  用户定方向「App Password 收信优先，Cookie 登录自动化往后排」。
+- 2026-10-12：D3 IMAP 收信完成：`mail/imap_client.py`（imaplib 标准库；连接/列信/按收件人查/
+  取全文/days 过滤）、`mail/idle.py`（UID 游标、分批同步、退避重连、stop_event 优雅退出）、
+  `mail/htmltext.py`（HTML 转文本）、`mail/service.py`（账号预检：iCloud 域名 + App Password 必填）、
+  机器路由 `GET /icloud-api/v1/accounts/{id}/mail?address=&limit=&days=`（线程池包装同步 imaplib，
+  预检失败 400 / 登录失败 401 / 上游故障 502）；`mail_imap` 能力旗标 shipped=true。
+  假 IMAP 服务器端到端 8 例 + 客户端单测 24 例。**有意偏差**：Go 的 days 过滤
+  （RFC1123Z 解析自己的 RFC3339 输出）从未生效，Python 版按本意实现并在测试固定；
+  **IDLE 路由未暴露**（idle.py 就绪，等待 D4/D5 的常驻摄入入口）。
+  `mail/web.py`（iCloud web 收信回退）未移植，`mail_web` 保持 shipped=false。
 - 待施工：D2 余下部分（`apple_login.py` SRP 登录会话、`apple_auth_legacy.py` 旧登录回退）、
-  D3 收信、D4 写操作与调度、D5 平台接线。
+  D3 余下部分（`mail/web.py` 回退 + IDLE 摄入路由）、D4 写操作与调度、D5 平台接线。
