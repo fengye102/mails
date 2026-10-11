@@ -4,6 +4,9 @@
 
 - 鉴权走「登录会话」：``POST /login {"password": ...}`` → ``200 {"success": true}`` + ``Set-Cookie``；
   之后的 ``/api/accounts*`` 必须携带该 Cookie，否则 ``401 AUTH_REQUIRED``。
+- 写操作（``POST``/``PUT``/``PATCH``/``DELETE``）还必须带会话级 ``X-CSRFToken``，取值来自
+  ``GET /api/csrf-token`` → ``{"csrf_token": ...}``（注意该响应**没有** ``success`` 字段）；
+  缺了会 ``400 CSRF_TOKEN_INVALID``。只读请求不需要。
 - 列账号：``GET /api/accounts?page=&page_size=`` → ``{"success": true, "accounts": [...],
   "pagination": {...}}``。
 - 增账号：``POST /api/accounts`` → ``{"success": true, "summary": {"imported": n, ...}}``；
@@ -37,6 +40,8 @@ from sqlalchemy.orm import Session as DbSession
 BASE_URL = "https://oep.example"
 PASSWORD = "login-password"
 COOKIE = "cookie-1"
+CSRF_COOKIE = "cookie-2"
+CSRF_TOKEN = "csrf-1"
 
 
 def account(index: int, **overrides):
@@ -87,12 +92,43 @@ def upstream(server):
                 json={"success": True, "message": "登录成功"},
                 headers={"Set-Cookie": f"session={COOKIE}; Path=/; HttpOnly"},
             )
-        # 以下都需要会话 Cookie。
-        if f"session={COOKIE}" not in request.headers.get("cookie", ""):
+        # 以下都需要会话 Cookie（CSRF 端点会轮换会话 Cookie，两个值都算有效）。
+        cookie_header = request.headers.get("cookie", "")
+        if f"session={COOKIE}" not in cookie_header and f"session={CSRF_COOKIE}" not in cookie_header:
             return httpx.Response(
                 401,
                 json={"success": False, "code": "AUTH_REQUIRED", "need_login": True},
             )
+        # 写操作必须带会话级 CSRF token（真实 OEP 缺了会 400 CSRF_TOKEN_INVALID）。
+        if path == "/api/csrf-token" and request.method == "GET":
+            # 真实 OEP 会把 token 写进服务端会话并下发新的会话 Cookie；客户端丢掉它就会
+            # 在下一次写操作报 "The CSRF session token is missing."。
+            return httpx.Response(
+                200,
+                json={"csrf_token": CSRF_TOKEN},
+                headers={"Set-Cookie": f"session={CSRF_COOKIE}; Path=/; HttpOnly"},
+            )
+        is_write = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        if is_write:
+            if request.headers.get("x-csrftoken") != CSRF_TOKEN:
+                return httpx.Response(
+                    400,
+                    json={
+                        "success": False,
+                        "error": {"code": "CSRF_TOKEN_INVALID", "message": "CSRF token missing"},
+                    },
+                )
+            if f"session={CSRF_COOKIE}" not in cookie_header:
+                return httpx.Response(
+                    400,
+                    json={
+                        "success": False,
+                        "error": {
+                            "code": "CSRF_TOKEN_INVALID",
+                            "details": "The CSRF session token is missing.",
+                        },
+                    },
+                )
         if mode == "accounts_500":
             return httpx.Response(503, text="overloaded")
         if mode == "accounts_nonjson":
@@ -101,16 +137,28 @@ def upstream(server):
             return httpx.Response(200, json={"success": True, "accounts": "nope"})
         if path == "/api/accounts" and request.method == "GET":
             page = int(request.url.params.get("page", "1"))
+            # 真实 OEP：page_size 上限 100；页码越界会被夹回最后一页（不是返回空页）。
+            page_size = min(int(request.url.params.get("page_size", "50")), 100)
             if server["pages"] is not None:
-                chunk = server["pages"].get(page, [])
+                source = [item for chunk in server["pages"].values() for item in chunk]
             else:
-                chunk = server["accounts"] if page == 1 else []
+                source = server["accounts"]
+            total_count = len(source)
+            total_pages = (total_count + page_size - 1) // page_size if total_count else 0
+            effective_page = min(page, total_pages) if total_pages else 1
+            start = (effective_page - 1) * page_size
+            chunk = source[start : start + page_size]
             return httpx.Response(
                 200,
                 json={
                     "success": True,
                     "accounts": chunk,
-                    "pagination": {"page": page, "page_size": 100, "total_count": len(chunk)},
+                    "pagination": {
+                        "page": effective_page,
+                        "page_size": page_size,
+                        "total_count": total_count,
+                        "total_pages": total_pages,
+                    },
                 },
             )
         if path == "/api/accounts" and request.method == "POST":
@@ -280,6 +328,32 @@ async def test_list_items_paginates_until_short_page(server):
         r.url.params["page"] for r in server["requests"] if r.url.path == "/api/accounts"
     ]
     assert pages == ["1", "2"]
+
+
+@pytest.mark.asyncio
+async def test_list_items_stops_on_total_count_when_page_is_full(server):
+    """满页必须靠 pagination.total_count 收尾。
+
+    真实 OEP 会把越界页码夹回最后一页，所以「返回不足一页就结束」的写法会无限翻页，
+    最终撞上 _MAX_PAGES 报 SOURCE_CONTRACT（线上实测：110 秒后才失败）。
+    """
+    server["accounts"] = [account(i) for i in range(1, 101)]  # 正好一页
+    async with client_for(server) as client:
+        items = await outlook_plus.build(client).list_items(BASE_URL, PASSWORD)
+    assert len(items) == 100
+    pages = [r.url.params["page"] for r in server["requests"] if r.url.path == "/api/accounts"]
+    assert pages == ["1"]  # 不允许多翻一页
+
+
+@pytest.mark.asyncio
+async def test_list_items_handles_multiple_full_pages(server):
+    server["accounts"] = [account(i) for i in range(1, 251)]
+    async with client_for(server) as client:
+        items = await outlook_plus.build(client).list_items(BASE_URL, PASSWORD)
+    assert len(items) == 250
+    assert len({i.provider_key for i in items}) == 250
+    pages = [r.url.params["page"] for r in server["requests"] if r.url.path == "/api/accounts"]
+    assert pages == ["1", "2", "3"]
 
 
 @pytest.mark.asyncio
@@ -460,7 +534,7 @@ async def test_export_accounts_two_step_flow(server):
         text = await outlook_plus.build(client).export_accounts(BASE_URL, PASSWORD)
     assert text == "user1@outlook.com----pw----cid----rt\n"
     paths = [r.url.path for r in server["requests"]]
-    assert paths == ["/login", "/api/export/verify", "/api/accounts/export"]
+    assert paths == ["/login", "/api/csrf-token", "/api/export/verify", "/api/accounts/export"]
     export_call = server["requests"][-1]
     assert export_call.headers["x-export-token"] == "verify-1"
 
@@ -707,3 +781,91 @@ def test_route_rejects_non_outlook_connection(admin_api, engine):
     response = client.get(f"/api/v1/sources/outlook_plus/{other_id}/items")
     assert response.status_code == 422
     assert response.json()["detail"] == "UNSUPPORTED_PROVIDER_KIND"
+
+
+# ==================== 会话级 CSRF（真实 OEP 写操作要求）====================
+
+
+@pytest.mark.asyncio
+async def test_create_item_fetches_session_csrf_and_sends_it(server):
+    """写操作必须先取会话 CSRF token 再带上；真实 OEP 缺了会 400 CSRF_TOKEN_INVALID。"""
+    async with client_for(server) as client:
+        await outlook_plus.build(client).create_item(
+            BASE_URL, PASSWORD, {"email": "user9@outlook.com", "client_id": "cid"}
+        )
+    paths = [r.url.path for r in server["requests"]]
+    assert paths.count("/api/csrf-token") == 1
+    writes = [r for r in server["requests"] if r.method == "POST" and r.url.path == "/api/accounts"]
+    assert len(writes) == 1
+    assert writes[0].headers["x-csrftoken"] == CSRF_TOKEN
+    # CSRF 请求本身要带会话 Cookie。
+    csrf_call = next(r for r in server["requests"] if r.url.path == "/api/csrf-token")
+    assert f"session={COOKIE}" in csrf_call.headers["cookie"]
+
+
+@pytest.mark.asyncio
+async def test_delete_and_refresh_send_session_csrf(server):
+    async with client_for(server) as client:
+        adapter = outlook_plus.build(client)
+        await adapter.delete_item(BASE_URL, PASSWORD, "user1@outlook.com")
+        await adapter.refresh_token(BASE_URL, PASSWORD, 7)
+    writes = [
+        r
+        for r in server["requests"]
+        if r.url.path.startswith("/api/") and r.method in {"DELETE", "POST"}
+    ]
+    assert writes, "应当有写请求"
+    assert all(r.headers.get("x-csrftoken") == CSRF_TOKEN for r in writes)
+    # 每次写操作各自取一次 token（适配器无状态）。
+    assert [r.url.path for r in server["requests"]].count("/api/csrf-token") == 2
+
+
+@pytest.mark.asyncio
+async def test_export_verify_sends_session_csrf(server):
+    async with client_for(server) as client:
+        text = await outlook_plus.build(client).export_accounts(BASE_URL, PASSWORD)
+    assert "user1@outlook.com" in text
+    verify_calls = [r for r in server["requests"] if r.url.path == "/api/export/verify"]
+    assert len(verify_calls) == 1
+    assert verify_calls[0].headers["x-csrftoken"] == CSRF_TOKEN
+
+
+@pytest.mark.asyncio
+async def test_read_only_calls_do_not_fetch_csrf(server):
+    """只读链路不应多打一次 /api/csrf-token。"""
+    async with client_for(server) as client:
+        adapter = outlook_plus.build(client)
+        await adapter.probe(BASE_URL, PASSWORD)
+        await adapter.list_items(BASE_URL, PASSWORD)
+    assert [r.url.path for r in server["requests"]].count("/api/csrf-token") == 0
+
+
+@pytest.mark.asyncio
+async def test_write_carries_session_cookie_rotated_by_csrf_endpoint(server):
+    """CSRF 端点下发的新会话 Cookie 必须带到写请求上。
+
+    真实 OEP：``GET /api/csrf-token`` 会把 token 写进服务端会话并 ``Set-Cookie`` 轮换会话；
+    只带登录时那份旧 Cookie 的写请求会 400 ``CSRF_TOKEN_INVALID``（The CSRF session token
+    is missing.）——线上实测踩到过。
+    """
+    async with client_for(server) as client:
+        await outlook_plus.build(client).delete_item(BASE_URL, PASSWORD, "user1@outlook.com")
+    delete_call = next(r for r in server["requests"] if r.method == "DELETE")
+    assert f"session={CSRF_COOKIE}" in delete_call.headers["cookie"]
+    assert delete_call.headers["x-csrftoken"] == CSRF_TOKEN
+
+
+@pytest.mark.asyncio
+async def test_csrf_endpoint_without_token_is_contract_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/login":
+            return httpx.Response(200, json={"success": True}, headers={"Set-Cookie": "session=x"})
+        if request.url.path == "/api/csrf-token":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, json={"success": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SourceAdminError) as exc:
+            await outlook_plus.build(client).delete_item(BASE_URL, PASSWORD, "user1@outlook.com")
+    assert exc.value.code == "SOURCE_CONTRACT"
+    assert exc.value.code in SOURCE_ERROR_CODES

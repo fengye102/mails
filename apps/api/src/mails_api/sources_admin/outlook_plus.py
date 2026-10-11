@@ -10,6 +10,12 @@
   只覆盖读取与号池领取，不含账号增删改。
 - 因此本适配器的 ``secret`` 是 **OEP 登录口令**：先 ``POST /login {"password": secret}``
   换取会话 Cookie，再用该 Cookie 调用 ``/api/accounts*``。
+- 写操作（``POST``/``DELETE``）另需会话级 ``X-CSRFToken``，取值来自 ``GET /api/csrf-token``
+  → ``{"csrf_token": ...}``（该响应**没有** ``success`` 字段）；缺了真实 OEP 会返回
+  ``400 CSRF_TOKEN_INVALID``。只读请求不需要。
+- 列账号分页：``page_size`` 上限 100，**页码越界会被上游夹回最后一页**（不是返回空页），
+  所以结束条件必须用 ``pagination.total_count``；靠「返回不足一页就结束」会无限翻页，
+  账号数恰好是页大小整数倍时必然踩中。
 - 所有失败一律映射为 ``base.SOURCE_ERROR_CODES`` 里的固定错误码；登录口令、会话 Cookie、
   上游 message 原文都不得进入异常消息、日志或响应体。
 """
@@ -28,6 +34,7 @@ _TIMEOUT_SECONDS = 20.0
 _PAGE_SIZE = 100
 _MAX_PAGES = 100
 _UNSAFE_KEY_CHARS = "/?#\\"
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def build(client: httpx.AsyncClient) -> OutlookPlusSourceAdmin:
@@ -61,6 +68,17 @@ def _key_text(value: Any) -> str:
     if any(ch.isspace() or ord(ch) < 32 for ch in text):
         raise _contract_error()
     return text
+
+
+def _pagination_total(payload: dict[str, Any], fallback: int | None) -> int | None:
+    """读取 ``pagination.total_count``；缺失或形状不对时沿用上一次的值（None 表示上游没给）。"""
+    pagination = payload.get("pagination")
+    if not isinstance(pagination, dict):
+        return fallback
+    value = pagination.get("total_count")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return fallback
+    return value
 
 
 def _iso_utc(value: Any) -> str | None:
@@ -132,6 +150,25 @@ class OutlookPlusSourceAdmin:
     def _cookie_header(cookies: httpx.Cookies) -> str:
         return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies.jar)
 
+    async def _csrf_token(self, url: str, cookies: httpx.Cookies) -> str:
+        """取当前会话的 CSRF token（写操作必需；响应没有 ``success`` 字段）。
+
+        上游会顺手轮换会话 Cookie（token 存在服务端会话里），所以必须把响应 Cookie 合并回
+        ``cookies``，否则后续写请求会报 ``CSRF_TOKEN_INVALID: The CSRF session token is missing.``
+        """
+        target = httpx.URL(url).copy_with(path="/api/csrf-token", query=None)
+        response = await self._do("GET", str(target), cookies=cookies)
+        try:
+            payload = response.json()
+        except ValueError:
+            raise _contract_error() from None
+        token = payload.get("csrf_token") if isinstance(payload, dict) else None
+        if not isinstance(token, str) or not token:
+            raise _contract_error()
+        if response.cookies:
+            cookies.update(response.cookies)
+        return token
+
     async def _do(
         self,
         method: str,
@@ -144,6 +181,10 @@ class OutlookPlusSourceAdmin:
     ) -> httpx.Response:
         request_headers = dict(headers or {})
         if cookies is not None:
+            if method.upper() in _MUTATING_METHODS and "X-CSRFToken" not in request_headers:
+                # 真实 OEP 的写操作要求会话级 CSRF token，缺了会 400 CSRF_TOKEN_INVALID。
+                # 取 token 会同时轮换会话 Cookie，所以必须在构造 Cookie 头之前完成。
+                request_headers["X-CSRFToken"] = await self._csrf_token(url, cookies)
             # 显式构造 Cookie 头，避免污染共享 client 的 cookie jar。
             request_headers["Cookie"] = self._cookie_header(cookies)
         try:
@@ -244,7 +285,9 @@ class OutlookPlusSourceAdmin:
         self, base_url: str, secret: str, config: dict | None = None
     ) -> list[SourceItem]:
         items: list[SourceItem] = []
+        seen: set[str] = set()
         page = 1
+        total_count: int | None = None
         while True:
             payload = await self._json_request(
                 "GET",
@@ -258,9 +301,24 @@ class OutlookPlusSourceAdmin:
             accounts = payload.get("accounts")
             if not isinstance(accounts, list) or len(accounts) > _PAGE_SIZE:
                 raise _contract_error()
+            total_count = _pagination_total(payload, total_count)
+            added = 0
             for account in accounts:
-                items.append(self._item(account))
-            if len(accounts) < _PAGE_SIZE:
+                item = self._item(account)
+                if item.provider_key in seen:
+                    # 上游把越界页码夹回时会重复投递同一批账号，去重避免列表里出现两份。
+                    continue
+                seen.add(item.provider_key)
+                items.append(item)
+                added += 1
+            if not accounts or added == 0:
+                # 空页，或这一页没有任何新账号（上游无法继续前进）——都不能再翻。
+                break
+            if total_count is None:
+                # 上游没给总数时，退回「短页即结束」的保守判断。
+                if len(accounts) < _PAGE_SIZE:
+                    break
+            elif len(items) >= total_count:
                 break
             page += 1
             if page > _MAX_PAGES:

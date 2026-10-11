@@ -104,3 +104,12 @@
 - `apps/api/src/mails_api/routes/source_<kind>.py`：管理路由，前缀 `/api/v1/sources/<kind>`；读操作 `require_member`，写操作叠加 `require_owner` + `require_csrf`；凭据复用连接的加密 secret，密钥与口令不进响应体、不进日志。
 - `apps/web/src/sources/<kind>/`：各来源的管理面板；统一入口是 `apps/web/src/sources/SourceManagementPage.tsx`，后台页签名「来源管理」。
 - 新建来源沿用同一套协议与错误码；来源专有动作（刷新令牌、库存同步、导出等）在各自模块追加实现，并在路由层单独暴露。
+
+## 上游来源的机器接口依赖
+- `outlook_plus`（OEP v2.9.10）：账号管理接口只有「登录会话」鉴权，写操作还要会话级 `X-CSRFToken`
+  （取自 `GET /api/csrf-token`；该端点会轮换会话 Cookie，必须把响应 Cookie 带回写请求）。本仓库的
+  连接 `secret` 用**对外 API Key**：读链路走 `X-API-Key`（`/api/external/*`），管理链路拿它当登录口令
+  换会话。因此 OEP 侧需挂本地补丁 `patches/crypto.py`（对外 API Key 可通过密码校验），否则管理链路 401。
+- `outlook_plus` 分页：`page_size` 上限 100，**页码越界会被上游夹回最后一页**（不是返回空页），结束条件
+  必须用 `pagination.total_count`；靠「返回不足一页」判断会无限翻页（账号数恰好是页大小整数倍时必踩）。
+- 适配器只映射固定错误码；上游 message 原文、登录口令、会话 Cookie、导出内容都不得进日志或响应体。
