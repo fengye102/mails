@@ -19,9 +19,10 @@ def test_capabilities_report_only_shipped_features(client) -> None:
     body = response.json()
     features = body["features"]
     assert features["aliases_read"] == {"shipped": True, "verified_live": False}
+    assert features["browser_auth"]["shipped"] is True
     assert features["apple_srp_login"]["shipped"] is True
-    # 没收信、没写别名、没授权、没调度，就不能对外声称可用。
-    for name in ("aliases_write", "mail_imap", "mail_web", "browser_auth", "scheduler", "mail_netease_web"):
+    # 没收信、没写别名、没调度、没接 Apple Account 会话，就不能对外声称可用。
+    for name in ("aliases_write", "mail_imap", "mail_web", "scheduler", "apple_account_session", "mail_netease_web"):
         assert features[name]["shipped"] is False, name
     # 还没上真机：任何链路都不能声称已在真实账号验证过。
     assert all(not state["verified_live"] for state in features.values())

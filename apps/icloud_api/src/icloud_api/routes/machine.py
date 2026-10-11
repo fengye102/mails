@@ -18,7 +18,8 @@ SHIPPED_FEATURES: dict[str, bool] = {
     "mail_imap": False,  # D3
     "mail_web": False,  # D3
     "mail_netease_web": False,  # 明确不移植（163 网页取件不做）
-    "browser_auth": False,  # D2
+    "browser_auth": True,  # D2：一次性授权码 + Cookie 回填校验（163 收件箱网页授权不移植）
+    "apple_account_session": False,  # D4：account.apple.com 会话引导（提配额用），尚未移植
     "apple_srp_login": True,  # D1：SRP 数学与登录会话骨架
     "scheduler": False,  # D4
 }

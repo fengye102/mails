@@ -3,8 +3,10 @@ import os
 
 import pytest
 from icloud_api.app import create_app
+from icloud_api.hme_client import AccountInfo
+from icloud_api.models import Base
 from icloud_api.settings import Settings
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.pool import StaticPool
 
 
@@ -25,14 +27,48 @@ def settings(data_key: bytes) -> Settings:
 @pytest.fixture
 def engine():
     # 内存 SQLite 必须共用一条连接，否则每个 Session 看到的是空库。
-    return create_engine(
+    engine = create_engine(
         "sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
 
+    # 规格要求：SQLite 测试必须开外键约束，否则级联/引用错误测不出来。
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_connection, _record):  # pragma: no cover - 驱动回调
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(engine)
+    return engine
+
+
+class FakeCookieValidator:
+    """假上游：记录收到的 Cookie，返回合并后的 Cookie 与账号身份。"""
+
+    def __init__(self, *, merged: dict[str, str] | None = None, error: Exception | None = None) -> None:
+        self.merged = merged
+        self.error = error
+        self.seen: list[dict[str, str]] = []
+
+    async def __call__(self, cookies: dict[str, str], account) -> tuple[dict[str, str], AccountInfo]:
+        self.seen.append(dict(cookies))
+        if self.error is not None:
+            raise self.error
+        merged = dict(cookies)
+        if self.merged:
+            merged.update(self.merged)
+        return merged, AccountInfo(dsid="123456", apple_id="user@example.com", primary_email="alias@icloud.com")
+
 
 @pytest.fixture
-def client(settings: Settings, engine):
+def validator() -> FakeCookieValidator:
+    return FakeCookieValidator(merged={"X-APPLE-WEBAUTH-TOKEN": "refreshed"})
+
+
+@pytest.fixture
+def client(settings: Settings, engine, validator: FakeCookieValidator):
     from fastapi.testclient import TestClient
 
-    with TestClient(create_app(settings, engine)) as test_client:
+    app = create_app(settings, engine, cookie_validator=validator)
+    with TestClient(app) as test_client:
         yield test_client
