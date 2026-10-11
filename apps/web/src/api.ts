@@ -60,6 +60,15 @@ const errors: Record<string, string> = {
   UPSTREAM_HTTPS_REQUIRED: "服务地址需要使用 HTTPS。",
   LOGIN_RATE_LIMITED: "登录尝试过于频繁，请稍后重试。",
   MAILBOX_NOT_READABLE: "上游邮箱不可读，请检查授权。",
+  SOURCE_AUTH: "上游鉴权失败，请检查该来源的凭据。",
+  SOURCE_TIMEOUT: "上游响应超时，请重试。",
+  SOURCE_UNAVAILABLE: "上游服务暂不可用，请稍后重试。",
+  SOURCE_CONTRACT: "上游响应格式异常，请检查来源版本。",
+  SOURCE_NOT_FOUND: "上游找不到该对象，请刷新列表。",
+  SOURCE_CONFLICT: "上游状态冲突，请刷新后重试。",
+  SOURCE_REJECTED: "上游拒绝了该操作，请检查参数或来源开关。",
+  CONNECTION_NOT_FOUND: "该来源连接不存在，请刷新页面。",
+  UNSUPPORTED_PROVIDER_KIND: "不支持的来源类型。",
 };
 export function errorText(code: string | null | undefined) {
   return code ? (errors[code] ?? "操作失败，请检查配置后重试。") : "";

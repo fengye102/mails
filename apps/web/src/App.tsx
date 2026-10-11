@@ -4,6 +4,7 @@ import { Login } from "./components/Login";
 import { Connections } from "./components/Connections";
 import { Mailboxes } from "./components/Mailboxes";
 import { Inbox } from "./components/Inbox";
+import { SourceManagementPage } from "./sources/SourceManagementPage";
 export function App() {
   const [session, setSession] = useState<Session | null>(null),
     [loading, setLoading] = useState(true),
@@ -59,7 +60,7 @@ export function App() {
         <strong>Mails</strong>
         <p>私有邮箱工作台</p>
         <nav aria-label="主导航">
-          {["收件箱", "邮箱", "来源连接"].map((name) => (
+          {["收件箱", "邮箱", "来源连接", "来源管理"].map((name) => (
             <button
               key={name}
               aria-current={page === name ? "page" : undefined}
@@ -80,8 +81,10 @@ export function App() {
           <Inbox />
         ) : page === "邮箱" ? (
           <Mailboxes csrfToken={session.csrf_token} />
-        ) : (
+        ) : page === "来源连接" ? (
           <Connections csrfToken={session.csrf_token} />
+        ) : (
+          <SourceManagementPage csrfToken={session.csrf_token} />
         )}
       </main>
     </div>

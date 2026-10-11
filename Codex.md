@@ -97,3 +97,10 @@
 - `infra/delivery-web.Dockerfile`：先构建 `apps/delivery_web` 再交给 Caddy 静态服务；`infra/delivery-web.Caddyfile` 保留 `/delivery-api/*` 反代以便容器内自测，对外仍由宿主机反代直连 API 以保留真实来源 IP。
 - 取件页只展示纯文本正文与验证码，不渲染 HTML；取件码输入框不使用自动填充，避免凭据被浏览器留存。
 - `apps/delivery_web/src/` 内组件用 `PascalCase.tsx`，其余模块 `camelCase.ts`，测试与被测文件同名。
+
+
+## 来源管理目录约定（A 的读写来源）
+- `apps/api/src/mails_api/sources_admin/`：来源管理适配器，按 kind 一个模块，统一暴露 `build(client) -> SourceAdmin`；错误码只用 `base.py` 里的 `SOURCE_ERROR_CODES`；只做无状态上游 HTTP 调用，不落库、不新增迁移，读邮件链路不受影响。
+- `apps/api/src/mails_api/routes/source_<kind>.py`：管理路由，前缀 `/api/v1/sources/<kind>`；读操作 `require_member`，写操作叠加 `require_owner` + `require_csrf`；凭据复用连接的加密 secret，密钥与口令不进响应体、不进日志。
+- `apps/web/src/sources/<kind>/`：各来源的管理面板；统一入口是 `apps/web/src/sources/SourceManagementPage.tsx`，后台页签名「来源管理」。
+- 新建来源沿用同一套协议与错误码；来源专有动作（刷新令牌、库存同步、导出等）在各自模块追加实现，并在路由层单独暴露。
