@@ -19,6 +19,18 @@ def new_code() -> str:
     return base64.urlsafe_b64encode(os.urandom(24)).decode("ascii").rstrip("=")
 
 
+PICKUP_KEY_PREFIX = "tok_"
+
+
+def new_pickup_key() -> str:
+    """取件密钥：与 CYMail 同格式（`tok_` + 48 字节 base64url），只存摘要。"""
+    return PICKUP_KEY_PREFIX + base64.urlsafe_b64encode(os.urandom(48)).decode("ascii").rstrip("=")
+
+
+def valid_pickup_key(value: str) -> bool:
+    return 32 <= len(value) <= 160 and value.startswith(PICKUP_KEY_PREFIX)
+
+
 def encrypt_value(key_text: str, value: str) -> bytes:
     try:
         key = base64.b64decode(key_text, validate=True)

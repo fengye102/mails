@@ -12,15 +12,25 @@ export interface DeliveryMessage {
   received_at: string;
   body_text: string;
   verification_code: string | null;
+  /** 正文里第一个 http(s) 链接：激活类邮件只有链接，没有数字验证码。 */
+  link: string | null;
+}
+
+/** 后端如实回报的入库状态；C 不做上游拉信，所以这里不是「实时同步」。 */
+export interface DeliverySync {
+  messages_total: number;
+  last_ingested_at: string | null;
 }
 
 export interface DeliveryMailbox {
   address: string;
+  sync: DeliverySync;
   messages: DeliveryMessage[];
 }
 
 const errors: Record<string, string> = {
   DELIVERY_PICKUP_INVALID: "取件码无效、已使用或已过期。",
+  DELIVERY_PICKUP_CREDENTIAL_REQUIRED: "请输入取件码，或直接打开收到的取件链接。",
   DELIVERY_PICKUP_RETRY_LATER: "尝试次数过多，请稍后再试。",
   DELIVERY_PICKUP_SESSION_INVALID: "取件会话已失效，请重新输入取件码。",
   DELIVERY_PICKUP_SCOPE_INVALID: "该取件会话无权读取此邮箱。",
@@ -79,11 +89,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.status === 204 ? (null as T) : response.json();
 }
 
-export async function verifyPickup(pickupCode: string): Promise<PickupSession> {
+function verify(body: Record<string, string>): Promise<PickupSession> {
   return request<PickupSession>("/pickups/verify", {
     method: "POST",
-    body: JSON.stringify({ pickup_code: pickupCode }),
+    body: JSON.stringify(body),
   });
+}
+
+/** 一次性取件码：验证成功即作废。 */
+export async function verifyPickup(pickupCode: string): Promise<PickupSession> {
+  return verify({ pickup_code: pickupCode });
+}
+
+/** 取件链接里的密钥：可重复验证；带上地址时后端会校验是否匹配。 */
+export async function verifyPickupKey(
+  pickupKey: string,
+  email?: string,
+): Promise<PickupSession> {
+  const body: Record<string, string> = { pickup_key: pickupKey };
+  if (email) body.email = email;
+  return verify(body);
 }
 
 export async function readMailbox(

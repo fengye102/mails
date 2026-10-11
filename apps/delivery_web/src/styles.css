@@ -73,6 +73,10 @@ button:disabled { cursor: default; opacity: .55; transform: none !important; }
 .verification { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 10px 12px; border: 1px dashed #b9c2d8; border-radius: 8px; background: #fff; }
 .verification span { font-size: 12px; font-weight: 800; color: #4f6bed; letter-spacing: .1em; }
 .verification code { font-size: 19px; font-weight: 700; letter-spacing: .08em; }
+.action-link { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 10px 12px; border: 1px solid #d9e3d5; border-radius: 8px; background: #f6fbf4; flex-wrap: wrap; }
+.action-link span { font-size: 12px; font-weight: 800; color: #2f7a3f; letter-spacing: .1em; }
+.action-link a { color: #2f6bd8; word-break: break-all; }
+.action-link button { border: 1px solid #b9c2d8; border-radius: 6px; background: #fff; color: #2b3550; padding: 6px 12px; }
 .message-item pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; color: #3b4557; }
 @media (max-width: 640px) {
   .delivery-header { flex-direction: column; align-items: flex-start; }

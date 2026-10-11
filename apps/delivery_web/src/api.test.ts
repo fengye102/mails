@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { errorText, formatRemaining, readMailbox, verifyPickup } from "./api";
+import {
+  errorText,
+  formatRemaining,
+  readMailbox,
+  verifyPickup,
+  verifyPickupKey,
+} from "./api";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -102,5 +108,59 @@ describe("formatRemaining", () => {
     expect(formatRemaining(45)).toBe("剩余 45 秒");
     expect(formatRemaining(600)).toBe("剩余约 10 分钟");
     expect(formatRemaining(3900)).toBe("剩余约 1 小时 5 分钟");
+  });
+});
+
+describe("verifyPickupKey", () => {
+  it("用取件密钥与地址调用验证接口", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        pickup_id: "pickup-1",
+        allocation_id: "allocation-1",
+        session_token: "session-1",
+        expires_at: "2026-10-11T12:00:00+00:00",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = await verifyPickupKey("tok_abc", "box@example.test");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/delivery-api/v1/pickups/verify");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      pickup_key: "tok_abc",
+      email: "box@example.test",
+    });
+    expect(session.allocation_id).toBe("allocation-1");
+  });
+
+  it("不带地址时只提交密钥", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        pickup_id: "pickup-1",
+        allocation_id: "allocation-1",
+        session_token: "session-1",
+        expires_at: "2026-10-11T12:00:00+00:00",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await verifyPickupKey("tok_abc");
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ pickup_key: "tok_abc" });
+  });
+
+  it("凭证缺失时给出固定中文提示", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ detail: { code: "DELIVERY_PICKUP_CREDENTIAL_REQUIRED" } }, 400),
+      ),
+    );
+
+    await expect(verifyPickup("")).rejects.toThrow(
+      "请输入取件码，或直接打开收到的取件链接。",
+    );
   });
 });

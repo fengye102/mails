@@ -5,9 +5,22 @@ import {
   formatRemaining,
   readMailbox,
   verifyPickup,
+  verifyPickupKey,
   type DeliveryMailbox,
   type PickupSession,
 } from "./api";
+
+/** 取件链接形如 `/pickup#email=..&key=..`：密钥放在 fragment 里，不会进服务端日志。 */
+export function readFragmentCredentials(
+  hash: string,
+): { key: string; email: string } | null {
+  const raw = hash.replace(/^#/, "").trim();
+  if (!raw) return null;
+  const params = new URLSearchParams(raw);
+  const key = (params.get("key") ?? "").trim();
+  if (!key) return null;
+  return { key, email: (params.get("email") ?? "").trim() };
+}
 
 export function App() {
   const [code, setCode] = useState("");
@@ -18,6 +31,7 @@ export function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [remaining, setRemaining] = useState(0);
+  const [linked, setLinked] = useState(false);
   const ticker = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -30,19 +44,15 @@ export function App() {
     return () => window.clearInterval(ticker.current);
   }, [session?.session_token]);
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setError("请输入取件码。");
-      return;
-    }
+  async function open(credential: { code?: string; key?: string; email?: string }) {
     setBusy(true);
     setError("");
     setNotice("");
     setMailbox(null);
     try {
-      const opened = await verifyPickup(trimmed);
+      const opened = credential.key
+        ? await verifyPickupKey(credential.key, credential.email)
+        : await verifyPickup(credential.code ?? "");
       setSession(opened);
       setMailbox(await readMailbox(opened.allocation_id, opened.session_token));
       setCode("");
@@ -52,6 +62,27 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // 打开取件链接即取件：读完 fragment 立刻把它从地址栏清掉，避免密钥留在历史记录/截图里。
+  useEffect(() => {
+    const credential = readFragmentCredentials(window.location.hash);
+    if (!credential) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    setLinked(true);
+    void open(credential);
+    // 只在首次挂载时读取链接，之后交给表单
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = code.trim();
+    if (!trimmed) {
+      setError("请输入取件码。");
+      return;
+    }
+    await open({ code: trimmed });
   }
 
   async function refresh() {
@@ -76,6 +107,7 @@ export function App() {
     setMailbox(null);
     setCode("");
     setNotice("");
+    setLinked(false);
   }
 
   async function copy(value: string, label: string) {
@@ -94,7 +126,7 @@ export function App() {
         <div>
           <p className="eyebrow">MAILS / PICKUP</p>
           <h1>取件</h1>
-          <p>输入取件码，领取分配给你的邮箱和其中的邮件。</p>
+          <p>输入取件码或直接打开取件链接，领取分配给你的邮箱和其中的邮件。</p>
         </div>
         {session && (
           <button className="ghost" onClick={closeSession}>
@@ -122,6 +154,7 @@ export function App() {
             <p className="muted">
               取件码一次性有效；验证成功后会立即失效，请勿转发给他人。
             </p>
+            {linked && busy && <p className="muted">正在通过取件链接进入…</p>}
             <form onSubmit={(event) => void submit(event)}>
               <label htmlFor="pickup-code">取件码</label>
               <input
@@ -146,6 +179,15 @@ export function App() {
                 <p className="address">{mailbox?.address ?? "读取中…"}</p>
                 <p className={remaining > 0 ? "ttl" : "ttl expired"}>
                   {remaining > 0 ? `会话${formatRemaining(remaining)}` : "会话已过期"}
+                </p>
+                <p className="muted">
+                  {mailbox
+                    ? `已入库 ${mailbox.sync.messages_total} 封${
+                        mailbox.sync.last_ingested_at
+                          ? ` · 最近更新 ${displayTime(mailbox.sync.last_ingested_at)}`
+                          : " · 暂无入库记录"
+                      }`
+                    : "读取中…"}
                 </p>
               </div>
               <div className="actions">
@@ -200,6 +242,17 @@ export function App() {
                             </button>
                           </div>
                         )}
+                        {message.link && (
+                          <div className="action-link">
+                            <span>行动链接</span>
+                            <a href={message.link} target="_blank" rel="noreferrer noopener">
+                              {message.link}
+                            </a>
+                            <button onClick={() => void copy(message.link ?? "", "行动链接")}>
+                              复制链接
+                            </button>
+                          </div>
+                        )}
                         <pre>{message.body_text || "（无正文）"}</pre>
                       </article>
                     </li>
@@ -210,7 +263,7 @@ export function App() {
           </section>
         )}
       </main>
-      <footer>取件会话到期后自动失效 · 取件码不落盘保存</footer>
+      <footer>取件会话到期后自动失效 · 取件码与密钥不落盘保存</footer>
     </div>
   );
 }

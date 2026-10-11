@@ -98,6 +98,24 @@
 - 取件页只展示纯文本正文与验证码，不渲染 HTML；取件码输入框不使用自动填充，避免凭据被浏览器留存。
 - `apps/delivery_web/src/` 内组件用 `PascalCase.tsx`，其余模块 `camelCase.ts`，测试与被测文件同名。
 
+## C2 统一取件交付约定（吸收 CYMail fulfillment）
+
+- C 是唯一的库存/取件交付实现；CYMail 的 `internal/fulfillment` 只作能力参照，不再新增功能。
+  规格见 `docs/superpowers/specs/2026-10-11-phase-c2-delivery-unification-design.md`。
+- 双取件凭证：`code`（一次性，验证即作废）与 `key`（`tok_` 前缀长密钥，可重复验证，重签才失效）。
+  两者都只存 SHA-256 摘要，明文只在签发响应返回一次；密钥随取件链接放在 URL fragment，
+  服务端与访问日志不得出现明文。
+- 邮件落在 `delivery_messages` 表，唯一键 `(mailbox_id, provider_message_id)`，重复推送是幂等更新；
+  `provider_message_id` 缺失时由内容指纹派生。**禁止**再把邮件写回邮箱行上的 JSON 列。
+- 入库即规范化：HTML 正文用 `delivery_api/htmltext.py` 转纯文本（保留换行，http(s) 锚点保留为
+  `文字 (URL)`），并用 `delivery_api/extract.py` 提取 `otp_code` 与 `link`；出库再经 `security.plain_text()`
+  兜底。取件响应任何情况下不得含 HTML 标签。
+- C 不做上游拉信（上游引擎属批次 7 范围）：邮件由运营/中枢通过幂等推送接口写入；取件响应里的
+  `sync` 只如实回报入库总数与最近入库时间，不伪装成实时同步。
+- 反枚举双桶限速：提交值摘要桶 + 来源 IP 桶，任一超限 429 `DELIVERY_PICKUP_RETRY_LATER`；
+  已知凭证在分配失效时的失败必须累加该凭证的 `failed_attempts`。
+- 公开取件路由统一附加 no-store / nosniff / no-referrer / 严格 CSP 响应头。
+
 
 ## 来源管理目录约定（A 的读写来源）
 - `apps/api/src/mails_api/sources_admin/`：来源管理适配器，按 kind 一个模块，统一暴露 `build(client) -> SourceAdmin`；错误码只用 `base.py` 里的 `SOURCE_ERROR_CODES`；只做无状态上游 HTTP 调用，不落库、不新增迁移，读邮件链路不受影响。

@@ -45,6 +45,21 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.state.engine = engine or create_engine(resolved.database_url)
     if engine is None:
         Base.metadata.create_all(app.state.engine)
+
+    @app.middleware("http")
+    async def public_pickup_headers(request, call_next):  # type: ignore[no-untyped-def]
+        """公开取件路由统一加固：不缓存、不嗅探、不带来源、禁一切子资源。"""
+        response = await call_next(request)
+        if request.url.path.startswith("/delivery-api/v1/pickups"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+            )
+        return response
+
     app.include_router(inventory_router)
     app.include_router(pickups_router)
     app.add_api_route("/healthz", lambda: {"status": "ok"}, methods=["GET"])

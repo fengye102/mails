@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///:memory:"
     operator_token: str = ""
     encryption_key: str = ""
+    # 取件链接的对外基址（例如 https://mail.orangeai.cfd）；留空则返回相对路径。
+    pickup_base_url: str = ""
     pickup_ttl_seconds: int = 900
     session_ttl_seconds: int = 1800
     pickup_failure_limit: int = 5
