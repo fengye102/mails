@@ -176,6 +176,9 @@ def verify_pickup(
     db.commit()
     return {
         "pickup_id": credential.id,
+        # 取件人手里只有取件码：读邮箱所需的分配标识
+        # 必须随验证结果一并返回，否则前端无法读取邮箱。
+        "allocation_id": allocation.id,
         "session_token": token,
         "expires_at": session_expires_at.isoformat(),
     }

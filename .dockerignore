@@ -31,6 +31,14 @@
 !apps/delivery_api/alembic/**
 !apps/delivery_api/src/
 !apps/delivery_api/src/**
+!apps/delivery_web/
+!apps/delivery_web/package.json
+!apps/delivery_web/package-lock.json
+!apps/delivery_web/index.html
+!apps/delivery_web/tsconfig.json
+!apps/delivery_web/vite.config.ts
+!apps/delivery_web/src/
+!apps/delivery_web/src/**
 !apps/web/
 !apps/web/package.json
 !apps/web/package-lock.json

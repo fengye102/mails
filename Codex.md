@@ -90,3 +90,10 @@
 - `docs/runbooks/delivery-mail.md`：C 部署、密钥轮换、库存回收和取件验收；明文取件码不写入日志或文档。
 - `infra/delivery-api.Dockerfile`、`infra/delivery-compose.yaml`：C 独立容器与 PostgreSQL 部署模板；不与 A/B1 卷、网络、密钥混用。
 - `.env.delivery.example`：C 环境变量占位模板；真实 operator token、加密密钥和数据库密码不入库。
+
+
+## C 取件交付页目录约定
+- `apps/delivery_web/`：C 阶段公开取件页（React + Vite + TypeScript），只调用 `/delivery-api/v1` 的取件接口；取件码与会话令牌仅存在于内存，不写 localStorage、Cookie 或日志。
+- `infra/delivery-web.Dockerfile`：先构建 `apps/delivery_web` 再交给 Caddy 静态服务；`infra/delivery-web.Caddyfile` 保留 `/delivery-api/*` 反代以便容器内自测，对外仍由宿主机反代直连 API 以保留真实来源 IP。
+- 取件页只展示纯文本正文与验证码，不渲染 HTML；取件码输入框不使用自动填充，避免凭据被浏览器留存。
+- `apps/delivery_web/src/` 内组件用 `PascalCase.tsx`，其余模块 `camelCase.ts`，测试与被测文件同名。

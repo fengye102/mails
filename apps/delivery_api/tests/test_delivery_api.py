@@ -293,3 +293,44 @@ def test_disabling_mailbox_invalidates_active_delivery(client):
     )
     assert verified.status_code == 401
 
+def test_pickup_verification_returns_readable_mailbox_scope(client):
+    """取件人手里只有取件码；验证成功后必须能凭返回值直接读邮箱，不需要知道内部分配标识。"""
+    mailbox = client.post(
+        "/delivery-api/v1/inventory/mailboxes",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={
+            "address": "delivery-scope@example.test",
+            "source_label": "cymail",
+            "messages": [
+                {
+                    "id": "m1",
+                    "subject": "\u9a8c\u8bc1\u7801",
+                    "sender": "noreply@example.test",
+                    "received_at": "2026-10-11T00:00:00Z",
+                    "body_text": "\u60a8\u7684\u9a8c\u8bc1\u7801\u662f 246810",
+                }
+            ],
+        },
+    ).json()
+    allocation = client.post(
+        "/delivery-api/v1/inventory/allocations",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={"mailbox_id": mailbox["id"], "external_ref": "order-scope", "ttl_seconds": 600},
+    ).json()
+    pickup = client.post(
+        "/delivery-api/v1/pickups",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={"allocation_id": allocation["id"], "ttl_seconds": 300},
+    ).json()
+    verified = client.post(
+        "/delivery-api/v1/pickups/verify", json={"pickup_code": pickup["pickup_code"]}
+    )
+    assert verified.status_code == 200
+    body = verified.json()
+    assert body["allocation_id"] == allocation["id"]
+    mailbox_response = client.get(
+        f"/delivery-api/v1/pickups/{body['allocation_id']}/mailbox",
+        headers={"Authorization": f"Bearer {body['session_token']}"},
+    )
+    assert mailbox_response.status_code == 200
+    assert mailbox_response.json()["address"] == "delivery-scope@example.test"
