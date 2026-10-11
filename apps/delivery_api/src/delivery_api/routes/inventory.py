@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from delivery_api.auth import require_operator
+from delivery_api.cleanup import cleanup_expired_allocations
 from delivery_api.db import get_db
 from delivery_api.models import (
     DeliveryAllocation,
@@ -19,6 +20,7 @@ from delivery_api.security import encrypt_value
 from delivery_api.time_utils import as_utc
 
 router = APIRouter(prefix="/delivery-api/v1/inventory")
+
 
 
 class MailboxInput(BaseModel):
@@ -126,6 +128,11 @@ def allocate(
         "status": allocation.status,
         "expires_at": allocation.expires_at.isoformat(),
     }
+
+
+@router.post("/allocations/cleanup", dependencies=[Depends(require_operator)])
+def cleanup_allocations(db: Annotated[Session, Depends(get_db)]):
+    return {"expired_allocations": cleanup_expired_allocations(db)}
 
 
 @router.post(

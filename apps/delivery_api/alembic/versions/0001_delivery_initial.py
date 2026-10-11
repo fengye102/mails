@@ -17,6 +17,8 @@ def upgrade():
     op.create_index("ix_pickup_credentials_allocation_id", "pickup_credentials", ["allocation_id"])
     op.create_index("ix_pickup_credentials_code_hash", "pickup_credentials", ["code_hash"], unique=True)
     op.create_index("ix_pickup_credentials_session_token_hash", "pickup_credentials", ["session_token_hash"])
+    op.create_table("pickup_attempts", sa.Column("id", sa.String(36), primary_key=True), sa.Column("source_hash", sa.String(64), nullable=False, unique=True), sa.Column("window_started_at", sa.DateTime(timezone=True), nullable=False), sa.Column("failed_attempts", sa.Integer(), nullable=False), sa.Column("blocked_until", sa.DateTime(timezone=True)), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
+    op.create_index("ix_pickup_attempts_source_hash", "pickup_attempts", ["source_hash"], unique=True)
     op.create_table("delivery_audit_events", sa.Column("id", sa.String(36), primary_key=True), sa.Column("event_type", sa.String(64), nullable=False), sa.Column("allocation_id", sa.String(36), sa.ForeignKey("delivery_allocations.id")), sa.Column("mailbox_id", sa.String(36), sa.ForeignKey("inventory_mailboxes.id")), sa.Column("details", sa.JSON()), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
     op.create_index("ix_delivery_audit_events_event_type", "delivery_audit_events", ["event_type"])
     op.create_index("ix_delivery_audit_events_allocation_id", "delivery_audit_events", ["allocation_id"])
@@ -26,6 +28,8 @@ def upgrade():
 def downgrade():
     for name, table in [("ix_delivery_audit_events_mailbox_id", "delivery_audit_events"), ("ix_delivery_audit_events_allocation_id", "delivery_audit_events"), ("ix_delivery_audit_events_event_type", "delivery_audit_events")]: op.drop_index(name, table_name=table)
     op.drop_table("delivery_audit_events")
+    for name, table in [("ix_pickup_attempts_source_hash", "pickup_attempts")]: op.drop_index(name, table_name=table)
+    op.drop_table("pickup_attempts")
     for name, table in [("ix_pickup_credentials_session_token_hash", "pickup_credentials"), ("ix_pickup_credentials_code_hash", "pickup_credentials"), ("ix_pickup_credentials_allocation_id", "pickup_credentials")]: op.drop_index(name, table_name=table)
     op.drop_table("pickup_credentials")
     for name, table in [("ix_delivery_allocations_status", "delivery_allocations"), ("ix_delivery_allocations_mailbox_id", "delivery_allocations")]: op.drop_index(name, table_name=table)

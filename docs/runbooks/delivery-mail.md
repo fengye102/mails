@@ -12,6 +12,8 @@ $env:PYTHONPATH = 'apps/delivery_api/src'
 
 ## 部署（具备 Docker 时）
 
+C Compose 包含独立 PostgreSQL、API 和 Caddy HTTPS 入口；API 启动时先执行 Alembic，运行期间每隔 `DELIVERY_CLEANUP_INTERVAL_SECONDS` 秒回收过期分配。
+
 ```powershell
 Copy-Item .env.delivery.example .env.delivery
 # 替换所有占位值；不要提交 .env.delivery
@@ -23,4 +25,6 @@ Copy-Item .env.delivery.example .env.delivery
 
 ## 未执行项
 
-当前环境缺少 Docker、PostgreSQL 和真实库存上游，因此不执行容器启动、真实数据库联调、HTTPS 和上游取件回归；这些必须在部署环境完成后再验收。
+本轮已在隔离 Compose 项目中完成 A、B1、C 的镜像构建与容器启动检查，并验证了 API healthz 和 Alembic 迁移；测试容器、网络和命名卷已清理。C 的 HTTPS 入口源码已接入 Compose，但没有用真实 DNS/公网证书完成外部 HTTPS 验收。
+
+仍未执行：真实上游库存/邮箱联调、生产域名及 ACME 证书验收、生产数据和密钥配置下的部署。

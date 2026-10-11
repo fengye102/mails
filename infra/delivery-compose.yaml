@@ -25,6 +25,10 @@ services:
       DELIVERY_ENCRYPTION_KEY: ${DELIVERY_ENCRYPTION_KEY:?required}
       DELIVERY_PICKUP_TTL_SECONDS: ${DELIVERY_PICKUP_TTL_SECONDS:-900}
       DELIVERY_SESSION_TTL_SECONDS: ${DELIVERY_SESSION_TTL_SECONDS:-1800}
+      DELIVERY_PICKUP_FAILURE_LIMIT: ${DELIVERY_PICKUP_FAILURE_LIMIT:-5}
+      DELIVERY_PICKUP_FAILURE_WINDOW_SECONDS: ${DELIVERY_PICKUP_FAILURE_WINDOW_SECONDS:-300}
+      DELIVERY_PICKUP_BACKOFF_SECONDS: ${DELIVERY_PICKUP_BACKOFF_SECONDS:-300}
+      DELIVERY_CLEANUP_INTERVAL_SECONDS: ${DELIVERY_CLEANUP_INTERVAL_SECONDS:-60}
     depends_on:
       delivery-db:
         condition: service_healthy
@@ -35,9 +39,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+  delivery-web:
+    build:
+      context: ..
+      dockerfile: infra/delivery-web.Dockerfile
+    restart: unless-stopped
+    environment:
+      DELIVERY_DOMAIN: ${DELIVERY_DOMAIN:?required}
+    ports:
+      - "${DELIVERY_HTTPS_PORT:-443}:443"
+    depends_on:
+      delivery-api:
+        condition: service_healthy
+    networks: [delivery_internal]
+    volumes:
+      - delivery_caddy_data:/data
+      - delivery_caddy_config:/config
 networks:
   delivery_internal:
     name: mails_delivery_internal
 volumes:
   delivery_pgdata:
     name: mails_delivery_pgdata
+  delivery_caddy_data:
+    name: mails_delivery_caddy_data
+  delivery_caddy_config:
+    name: mails_delivery_caddy_config

@@ -190,6 +190,73 @@ def test_expired_allocations_are_reclaimed_before_reuse(client):
     assert reused.json()["id"] != expired["id"]
 
 
+def test_operator_cleanup_reclaims_expired_allocations_idempotently(client):
+    mailbox = client.post(
+        "/delivery-api/v1/inventory/mailboxes",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={"address": "cleanup@example.test", "source_label": "source", "messages": []},
+    ).json()
+    allocation = client.post(
+        "/delivery-api/v1/inventory/allocations",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={"mailbox_id": mailbox["id"], "external_ref": "cleanup", "ttl_seconds": 0},
+    ).json()
+
+    first = client.post(
+        "/delivery-api/v1/inventory/allocations/cleanup",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+    )
+    second = client.post(
+        "/delivery-api/v1/inventory/allocations/cleanup",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+    )
+
+    assert first.status_code == 200
+    assert first.json() == {"expired_allocations": 1}
+    assert second.status_code == 200
+    assert second.json() == {"expired_allocations": 0}
+    audit = client.get(
+        "/delivery-api/v1/inventory/audit",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+    ).json()["items"]
+    expired_events = [
+        event for event in audit
+        if event["event_type"] == "allocation_expired"
+        and event["allocation_id"] == allocation["id"]
+    ]
+    assert len(expired_events) == 1
+
+    reused = client.post(
+        "/delivery-api/v1/inventory/allocations",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+        json={"mailbox_id": mailbox["id"], "external_ref": "cleanup-reused", "ttl_seconds": 600},
+    )
+    assert reused.status_code == 201
+
+
+def test_invalid_pickup_codes_are_backed_off_and_audited(client):
+    responses = [
+        client.post(
+            "/delivery-api/v1/pickups/verify",
+            json={"pickup_code": "wrong-code"},
+        )
+        for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses[:5]] == [401] * 5
+    assert responses[0].json()["detail"]["code"] == "DELIVERY_PICKUP_INVALID"
+    assert responses[5].status_code == 429
+    assert responses[5].json()["detail"]["code"] == "DELIVERY_PICKUP_RETRY_LATER"
+
+    audit = client.get(
+        "/delivery-api/v1/inventory/audit",
+        headers={"Authorization": f"Bearer {OPERATOR}"},
+    ).json()["items"]
+    failures = [event for event in audit if event["event_type"] == "pickup_verification_failed"]
+    assert len(failures) == 5
+    assert "wrong-code" not in str(audit)
+
+
 def test_disabling_mailbox_invalidates_active_delivery(client):
     mailbox = client.post(
         "/delivery-api/v1/inventory/mailboxes",

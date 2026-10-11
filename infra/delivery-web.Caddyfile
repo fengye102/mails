@@ -1,0 +1,15 @@
+{
+    auto_https disable_redirects
+}
+
+{$DELIVERY_DOMAIN} {
+    handle /delivery-api/* {
+        reverse_proxy delivery-api:8200
+        header Cache-Control "no-store"
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Cache-Control "no-store"
+    }
+}

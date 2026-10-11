@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, LargeBinary, String, Text
@@ -10,7 +10,7 @@ class Base(DeclarativeBase):
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class InventoryMailbox(Base):
@@ -51,6 +51,16 @@ class PickupCredential(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class PickupAttempt(Base):
+    __tablename__ = "pickup_attempts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 

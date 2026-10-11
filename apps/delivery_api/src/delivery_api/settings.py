@@ -8,3 +8,7 @@ class Settings(BaseSettings):
     encryption_key: str = ""
     pickup_ttl_seconds: int = 900
     session_ttl_seconds: int = 1800
+    pickup_failure_limit: int = 5
+    pickup_failure_window_seconds: int = 300
+    pickup_backoff_seconds: int = 300
+    cleanup_interval_seconds: int = 60
