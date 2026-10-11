@@ -57,6 +57,8 @@ def register_mailbox(
         expires_at=payload.expires_at,
     )
     db.add(row)
+    # 审计事件外键指向本行，必须先 flush 让被引用行落库（SQLAlchemy 不保证按 add 顺序插入）。
+    db.flush()
     db.add(DeliveryAuditEvent(event_type="mailbox_registered", mailbox_id=row.id))
     db.commit()
     return {"id": row.id, "address": row.address, "status": row.status}
@@ -114,6 +116,8 @@ def allocate(
     )
     row.status = "allocated"
     db.add(allocation)
+    # 同上：审计事件引用新分配的 id，先 flush。
+    db.flush()
     db.add(
         DeliveryAuditEvent(
             event_type="mailbox_allocated",

@@ -4,7 +4,7 @@ from delivery_api.app import create_app
 from delivery_api.models import Base
 from delivery_api.settings import Settings
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.pool import StaticPool
 
 OPERATOR = "operator-test-token"
@@ -13,6 +13,15 @@ OPERATOR = "operator-test-token"
 @pytest.fixture
 def client():
     engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    # SQLite 默认不校验外键，会让「审计事件先于被引用行插入」这类顺序问题漏过测试；
+    # 打开后与 PostgreSQL 行为一致。
+    @event.listens_for(engine, "connect")
+    def _enforce_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.create_all(engine)
     app = create_app(
         Settings(database_url="sqlite+pysqlite:///:memory:", operator_token=OPERATOR, encryption_key="test-encryption-key", pickup_ttl_seconds=300),

@@ -3,6 +3,7 @@ import asyncio
 import base64
 import binascii
 import re
+import secrets
 from email import policy
 from email.parser import Parser
 from email.utils import getaddresses
@@ -48,6 +49,9 @@ def _row_id(value: object) -> str:
 
 def _parse_datetime(value: object) -> str:
     value = _text(value, required=True)
+    # 上游 D1 的 datetime('now') 形如 "2026-10-11 11:39:25"：UTC 但既无 T 也无时区。
+    if re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", value):
+        return value.replace(" ", "T") + "+00:00"
     if not re.fullmatch(r"\d{4}-\d\d-\d\dT.+", value):
         raise UpstreamError("UPSTREAM_CONTRACT")
     return value.replace("Z", "+00:00")
@@ -173,15 +177,18 @@ class CloudflarePublicAdapter:
     def __init__(self, client: httpx.AsyncClient):
         self.client = client
 
-    async def _request(self, base_url: str, token: str, method: str, path: str, *, admin=False, params=None):
+    async def _request(self, base_url: str, token: str, method: str, path: str, *, admin=False, params=None, json_body=None):
         headers = {"Authorization": f"Bearer {token}"}
         if admin:
             headers["X-Admin-Auth"] = token
+        if json_body is not None:
+            headers["Content-Type"] = "application/json"
         for attempt in range(2):
             try:
                 async with asyncio.timeout(20):
                     response = await self.client.request(
                         method, base_url.rstrip("/") + path, headers=headers, params=params,
+                        json=json_body,
                         timeout=httpx.Timeout(20, connect=5), follow_redirects=False,
                     )
             except (httpx.TimeoutException, TimeoutError):
@@ -204,7 +211,11 @@ class CloudflarePublicAdapter:
         raise UpstreamError("UPSTREAM_UNAVAILABLE")
 
     async def create_address(self, base_url: str, admin_key: str) -> CreatedAddress:
-        response = await self._request(base_url, admin_key, "POST", "/admin/new_address", admin=True)
+        # 上游 /admin/new_address 要求 JSON body，且 name 为必填字段；空请求会被上游解析成 500。
+        response = await self._request(
+            base_url, admin_key, "POST", "/admin/new_address", admin=True,
+            json_body={"enablePrefix": True, "name": f"tmp{secrets.token_hex(6)}"},
+        )
         try:
             payload = response.json()
         except ValueError:
@@ -216,7 +227,8 @@ class CloudflarePublicAdapter:
         return CreatedAddress(address=_text(address, required=True), jwt=_text(jwt, required=True))
 
     async def list_messages(self, base_url: str, address_jwt: str, address: str) -> list[dict]:
-        response = await self._request(base_url, address_jwt, "GET", "/api/mails", params={"address": address})
+        # 上游要求 limit(1..100) 与 offset(>=0)，缺参直接 400；具体邮箱由地址 JWT 决定。
+        response = await self._request(base_url, address_jwt, "GET", "/api/mails", params={"limit": 100, "offset": 0})
         try:
             payload = response.json()
         except ValueError:
@@ -233,7 +245,7 @@ class CloudflarePublicAdapter:
         return messages
 
     async def get_message(self, base_url: str, address_jwt: str, address: str, message_id: str) -> dict:
-        response = await self._request(base_url, address_jwt, "GET", "/api/mails/" + quote(message_id, safe=""))
+        response = await self._request(base_url, address_jwt, "GET", "/api/mail/" + quote(message_id, safe=""))
         try:
             payload = response.json()
         except ValueError:

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from public_mail_api.providers.cloudflare_public import (
@@ -22,6 +24,11 @@ async def test_create_address_sends_admin_auth_and_normalizes_contract():
         assert request.method == "POST"
         assert request.url.path == "/admin/new_address"
         assert request.headers["x-admin-auth"] == KEY
+        # 真实 worker 要求 JSON body 且 name 必填：空 body 会被解析成 500
+        assert request.headers["content-type"] == "application/json"
+        body = json.loads(request.content)
+        assert body["enablePrefix"] is True
+        assert isinstance(body.get("name"), str) and body["name"]
         return response({"address": "a@example.com", "jwt": "address-jwt"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -54,6 +61,8 @@ async def test_list_and_detail_use_address_jwt_without_leaking_it():
         assert "address-jwt" not in str(request.url)
         if request.url.path.endswith("/42"):
             return response({"id": "42", "raw": "From: a@example.com\\n\\ncode 1234", "created_at": "2026-10-10T00:00:00Z"})
+        assert request.url.params.get("limit") == "100"
+        assert request.url.params.get("offset") == "0"
         return response({"results": [{"id": "42", "raw": "From: a@example.com\\n\\ncode 1234", "created_at": "2026-10-10T00:00:00Z"}]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -87,3 +96,27 @@ async def test_html_only_mail_is_returned_as_plain_text_without_script_content()
     assert message["body_text"] == "Code 482901"
     assert "<script>" not in message["body_text"]
     assert "secret" not in message["body_text"]
+
+
+@pytest.mark.asyncio
+async def test_d1_datetime_without_timezone_is_accepted_as_utc():
+    # 上游 D1 的 datetime('now') 返回 "YYYY-MM-DD HH:MM:SS"：UTC，但没有 T 也没有时区。
+    def handler(request):
+        return response(
+            {
+                "results": [
+                    {
+                        "id": "42",
+                        "raw": "From: a@example.com",
+                        "created_at": "2026-10-11 11:39:25",
+                    }
+                ]
+            }
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        listed = await CloudflarePublicAdapter(client).list_messages(
+            BASE_URL, "address-jwt", "a@example.com"
+        )
+
+    assert listed[0]["received_at"] == "2026-10-11T11:39:25+00:00"

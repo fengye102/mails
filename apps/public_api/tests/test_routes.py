@@ -1,4 +1,5 @@
 import base64
+import json
 from datetime import timedelta
 
 import httpx
@@ -31,6 +32,9 @@ def make_app(handler):
 
 def upstream_handler(request: httpx.Request) -> httpx.Response:
     if request.method == "POST" and request.url.path == "/admin/new_address":
+        # 真实 worker 要求 JSON body 且 name 必填
+        body = json.loads(request.content or b"{}")
+        assert isinstance(body.get("name"), str) and body["name"]
         return httpx.Response(
             200, json={"address": "demo@example.com", "jwt": "address-jwt"}
         )
@@ -50,7 +54,7 @@ def upstream_handler(request: httpx.Request) -> httpx.Response:
                 ]
             },
         )
-    if request.url.path == "/api/mails/message-1":
+    if request.url.path == "/api/mail/message-1":
         return httpx.Response(
             200,
             json={
