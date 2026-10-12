@@ -1,0 +1,14 @@
+# 统一 LF 换行（Windows 编辑过的文件常带 CRLF，Git 落库/检出都归一为 LF）
+* text=auto
+*.py text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
