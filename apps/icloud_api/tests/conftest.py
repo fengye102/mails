@@ -3,12 +3,13 @@ import os
 
 import pytest
 from fake_imap import FakeImapServer
+from sqlalchemy import create_engine, event
+from sqlalchemy.pool import StaticPool
+
 from icloud_api.app import create_app
 from icloud_api.hme_client import AccountInfo
 from icloud_api.models import Base
 from icloud_api.settings import Settings
-from sqlalchemy import create_engine, event
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture

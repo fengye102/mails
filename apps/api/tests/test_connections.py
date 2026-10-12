@@ -3,12 +3,13 @@ import base64
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from mails_api.app import create_app
 from mails_api.models import Base, Mailbox, ProviderConnection, User
 from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 SECRET = "test-key"
 BODY = {

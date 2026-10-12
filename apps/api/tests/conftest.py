@@ -1,12 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.pool import StaticPool
+
 from mails_api.app import create_app
 from mails_api.models import Base, User
 from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session as DbSession
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture

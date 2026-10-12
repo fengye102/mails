@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 
 import pytest
+
 from icloud_api.aliases import (
     Alias,
     AliasError,

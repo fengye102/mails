@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import httpx
+
 from mails_api.providers.base import (
     MessageListIssue,
     MessageListResult,
@@ -85,7 +86,7 @@ def _parse_date(value: object) -> datetime:
     if parsed.tzinfo is None:
         raise _contract_error()
     try:
-        return parsed.astimezone(timezone.utc)
+        return parsed.astimezone(UTC)
     except (ValueError, OverflowError):
         raise _contract_error() from None
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 def attempt(client, username="owner", password="wrong", headers=None):
@@ -34,7 +34,7 @@ def test_limiter_window_and_peer_isolation():
     from mails_api.security.login_limit import LoginLimiter
 
     limiter = LoginLimiter()
-    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 9, tzinfo=UTC)
     for _ in range(5):
         limiter.record_failure("Owner", "peer-one", now)
     assert limiter.is_limited("OWNER", "peer-one", now)
@@ -47,7 +47,7 @@ def test_limiter_window_and_peer_isolation():
 
 
 def test_http_bucket_expires(security_client, monkeypatch):
-    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 9, tzinfo=UTC)
     monkeypatch.setattr("mails_api.routes.session.utc_now", lambda: now)
     for _ in range(5):
         assert attempt(security_client).status_code == 401
@@ -60,7 +60,7 @@ def test_out_of_order_failure_expires_behind_newer_failures():
     from mails_api.security.login_limit import LoginLimiter
 
     limiter = LoginLimiter()
-    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 9, tzinfo=UTC)
     for _ in range(4):
         limiter.record_failure("owner", "peer", now + timedelta(minutes=1))
     # The older request completes after the newer requests.
@@ -73,7 +73,7 @@ def test_out_of_order_failure_does_not_evict_newer_failures():
     from mails_api.security.login_limit import LoginLimiter
 
     limiter = LoginLimiter()
-    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 9, tzinfo=UTC)
     for minute in range(1, 6):
         limiter.record_failure("owner", "peer", now + timedelta(minutes=minute))
     limiter.record_failure("owner", "peer", now)

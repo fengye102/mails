@@ -1,4 +1,5 @@
 import pytest
+
 from mails_api.services.extract import extract_code, extract_link
 
 

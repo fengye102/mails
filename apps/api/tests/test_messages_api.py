@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from mails_api.models import Mailbox, Message, ProviderConnection, Session, utc_now
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
+
+from mails_api.models import Mailbox, Message, ProviderConnection, Session, utc_now
 
 
 @pytest.fixture
@@ -55,7 +56,7 @@ def messages_client(security_client, engine):
                     recipient="owner@example.com",
                     subject=subject,
                     snippet="summary only",
-                    received_at=datetime(2026, 10, 9, hour, tzinfo=timezone.utc),
+                    received_at=datetime(2026, 10, 9, hour, tzinfo=UTC),
                     body_text='Verification code: 123456\n<script>alert("x")</script>',
                     verification_code="123456" if i == 1 else None,
                 )
@@ -161,7 +162,7 @@ def test_query_source_kind_and_connection_filters(messages_client, engine):
             recipient="owner@example.com",
             subject="different",
             snippet="other body",
-            received_at=datetime(2026, 10, 9, 16, tzinfo=timezone.utc),
+            received_at=datetime(2026, 10, 9, 16, tzinfo=UTC),
             body_text="needle in body",
         )
         db.add(extra_mail)
@@ -279,7 +280,7 @@ def test_default_limit_is_fifty(messages_client, engine):
                     subject="extra",
                     snippet="summary",
                     body_text="private",
-                    received_at=datetime(2026, 10, 9, tzinfo=timezone.utc),
+                    received_at=datetime(2026, 10, 9, tzinfo=UTC),
                 )
                 for i in range(60)
             ]

@@ -1,10 +1,11 @@
 """Owner bootstrap rejects unusable credentials before any write."""
 
 import pytest
-from mails_api.cli import main
-from mails_api.models import Base, User
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+
+from mails_api.cli import main
+from mails_api.models import Base, User
 
 
 @pytest.mark.parametrize(

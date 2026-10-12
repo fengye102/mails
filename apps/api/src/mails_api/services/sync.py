@@ -3,16 +3,18 @@
 import asyncio
 import inspect
 import logging
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta
 from weakref import WeakKeyDictionary
 
 import httpx
 from cryptography.exceptions import InvalidTag
+from sqlalchemy import select
+
 from mails_api.models import Mailbox, Message, ProviderConnection, SyncRun, utc_now
 from mails_api.providers.base import ProviderError
+from mails_api.providers.factory import ACCOUNT_SCOPED_KINDS
 from mails_api.security.crypto import decrypt_secret
 from mails_api.services.extract import extract_code
-from sqlalchemy import select
 
 # Entries exist only while running; Engine weak keys avoid retaining disposed apps.
 _running = WeakKeyDictionary()
@@ -83,9 +85,10 @@ async def sync_mailbox(
     # Cache scalar values before commit expires ORM instances. No connection
     # may be held while waiting for upstream I/O.
     base_url = connection.base_url
+    # 账号寻址的来源：provider key 才是上游认的地址（裸地址只用于展示）。
     address = (
         mailbox.provider_mailbox_key
-        if connection.kind == "cymail"
+        if connection.kind in ACCOUNT_SCOPED_KINDS
         else mailbox.address
     )
     connection_status, encrypted_secret = connection.status, connection.encrypted_secret
@@ -137,7 +140,7 @@ async def sync_mailbox(
             for summary in summaries:
                 key = summary.provider_message_key
                 received = summary.received_at.replace(
-                    tzinfo=summary.received_at.tzinfo or timezone.utc
+                    tzinfo=summary.received_at.tzinfo or UTC
                 )
                 if key in existing or (
                     first_sync and received < now - timedelta(days=7)
@@ -217,10 +220,11 @@ async def sync_mailbox(
 
 async def sync_all_mailboxes(app):
     """Independent sessions/tasks ensure a slow mailbox cannot block its peers."""
-    from mails_api.routes.connections import allowed_origin, get_adapter_for
-    from mails_api.security.crypto import decode_key
     from sqlalchemy.orm import Session
     from starlette.requests import Request
+
+    from mails_api.routes.connections import allowed_origin, get_adapter_for
+    from mails_api.security.crypto import decode_key
 
     with Session(app.state.engine) as db:
         ids = list(

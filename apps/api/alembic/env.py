@@ -2,9 +2,10 @@
 
 import os
 
+from sqlalchemy import create_engine, pool
+
 from alembic import context
 from mails_api.models import Base
-from sqlalchemy import create_engine, pool
 
 config = context.config
 target_metadata = Base.metadata

@@ -30,11 +30,12 @@ from uuid import UUID
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from mails_api.app import create_app
 from mails_api.models import Base, ProviderConnection, User
 from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
-from sqlalchemy.orm import Session
 
 KEY = bytes(range(32))
 PUBLIC = "http://localhost:5173"

@@ -3,6 +3,7 @@
 import json
 
 import pytest
+
 from icloud_api.accounts import (
     account_app_password,
     account_apple_session,

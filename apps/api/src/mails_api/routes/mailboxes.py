@@ -6,10 +6,15 @@ from uuid import UUID
 
 from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.db import get_db
 from mails_api.models import Mailbox, ProviderConnection
 from mails_api.providers.base import ProviderError
-from mails_api.providers.cymail import mailbox_key as cymail_mailbox_key
+from mails_api.providers.factory import AccountIdRequired, mailbox_key_for
 from mails_api.routes.connections import (
     allowed_origin,
     checked_time,
@@ -19,10 +24,6 @@ from mails_api.routes.connections import (
 )
 from mails_api.security.crypto import decrypt_secret
 from mails_api.security.csrf import require_csrf, require_member, require_owner
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session as DbSession
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_member)])
 
@@ -75,12 +76,12 @@ async def create_mailbox(
         raise HTTPException(
             status_code=503, detail="CONNECTION_SECRET_INVALID"
         ) from None
-    provider_address = body.address
-    if connection.kind == "cymail":
-        account_id = (connection.config_json or {}).get("account_id")
-        if not isinstance(account_id, str) or not account_id.strip():
-            raise HTTPException(status_code=422, detail="CYMAIL_ACCOUNT_ID_REQUIRED")
-        provider_address = cymail_mailbox_key(account_id, body.address)
+    try:
+        provider_address = mailbox_key_for(
+            connection.kind, connection.config_json or {}, body.address
+        )
+    except AccountIdRequired as exc:
+        raise HTTPException(status_code=422, detail=exc.code) from None
     try:
         provider_key = await adapter.check_mailbox(
             origin, secret, provider_address, connection.config_json or {}

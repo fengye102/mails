@@ -3,12 +3,13 @@
 import asyncio
 import math
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.parser import Parser
 from urllib.parse import quote
 
 import httpx
+
 from mails_api.providers.base import (
     MessageListIssue,
     MessageListResult,
@@ -141,7 +142,7 @@ class OutlookPlusAdapter:
         ):
             raise _contract_error()
         try:
-            received_at = datetime.fromtimestamp(timestamp, timezone.utc)
+            received_at = datetime.fromtimestamp(timestamp, UTC)
         except (ValueError, OverflowError, OSError):
             raise _contract_error() from None
         return MessageSummary(

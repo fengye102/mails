@@ -1,8 +1,11 @@
 import asyncio
 from dataclasses import asdict, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from mails_api.models import Base, Mailbox, Message, ProviderConnection, SyncRun
 from mails_api.providers.base import (
     MessageListIssue,
@@ -13,10 +16,8 @@ from mails_api.providers.base import (
 )
 from mails_api.security.crypto import encrypt_secret
 from mails_api.services.sync import sync_mailbox
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
-NOW = datetime(2026, 10, 9, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 9, tzinfo=UTC)
 KEY = bytes(range(32))
 
 
@@ -188,6 +189,7 @@ def test_sync_routes_auth_csrf_and_results(engine):
 
     import httpx
     from fastapi.testclient import TestClient
+
     from mails_api.app import create_app
     from mails_api.models import User
     from mails_api.security.passwords import hash_password
@@ -294,6 +296,7 @@ async def test_scheduler_mailboxes_are_concurrent_and_decrypt_secrets(
     from types import SimpleNamespace
 
     import httpx
+
     from mails_api.services.sync import sync_all_mailboxes
     from mails_api.settings import Settings
 
@@ -339,6 +342,7 @@ async def test_scheduler_mailboxes_are_concurrent_and_decrypt_secrets(
 @pytest.mark.asyncio
 async def test_real_adapter_without_key_never_sends_request(db, mailbox):
     import httpx
+
     from mails_api.providers.outlook_plus import OutlookPlusAdapter
 
     calls = []
@@ -357,9 +361,10 @@ async def test_small_pool_released_during_http_and_scheduler_is_bounded(tmp_path
     from types import SimpleNamespace
 
     import httpx
+    from sqlalchemy import create_engine
+
     from mails_api.services.sync import sync_all_mailboxes
     from mails_api.settings import Settings
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         "sqlite:///" + str(tmp_path / "limited-pool.db"),
@@ -413,7 +418,7 @@ async def test_small_pool_released_during_http_and_scheduler_is_bounded(tmp_path
             "from_address": "sender",
             "subject": "Code",
             "content_preview": "",
-            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "timestamp": datetime.now(UTC).timestamp(),
         }
         if request.url.path.endswith("/messages"):
             data = {"emails": [item]}
@@ -464,6 +469,7 @@ async def test_unpersistable_detail_is_partial_and_keeps_good(
     import json
 
     import httpx
+
     from mails_api.providers.outlook_plus import OutlookPlusAdapter
     from mails_api.routes.sync_runs import run_payload
 

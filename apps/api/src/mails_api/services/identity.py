@@ -4,9 +4,10 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 
-from mails_api.models import Message
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from mails_api.models import Message
 
 _RFC_MESSAGE_ID = re.compile(r"<[^<>\s@]+@[^<>\s@]+>")
 

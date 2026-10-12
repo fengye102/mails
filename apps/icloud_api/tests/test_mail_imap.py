@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fake_imap import FakeImapServer
+
 from icloud_api.mail.imap_client import (
     ImapClient,
     ImapError,

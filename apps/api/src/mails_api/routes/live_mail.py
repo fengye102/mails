@@ -20,10 +20,12 @@ from uuid import UUID
 import httpx
 from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.db import get_db
 from mails_api.models import ProviderConnection
 from mails_api.providers.base import MessageSummary, ProviderError
-from mails_api.providers.cymail import mailbox_key as cymail_mailbox_key
+from mails_api.providers.factory import AccountIdRequired, mailbox_key_for
 from mails_api.routes.connections import (
     allowed_origin,
     encryption_key,
@@ -33,7 +35,6 @@ from mails_api.routes.connections import (
 from mails_api.security.crypto import decrypt_secret
 from mails_api.security.csrf import require_member
 from mails_api.services.extract import extract_code, extract_link
-from sqlalchemy.orm import Session as DbSession
 
 router = APIRouter(
     prefix="/api/v1/connections", dependencies=[Depends(require_member)]
@@ -77,14 +78,11 @@ def _load_connection(
 
 
 def _provider_address(connection: ProviderConnection, address: str) -> str:
-    """CYMail 按「账号 + 别名」寻址，其余来源直接用邮箱地址。"""
-    value = address.strip().lower()
-    if connection.kind != "cymail":
-        return value
-    account_id = (connection.config_json or {}).get("account_id")
-    if not isinstance(account_id, str) or not account_id.strip():
-        raise HTTPException(status_code=422, detail="CYMAIL_ACCOUNT_ID_REQUIRED")
-    return cymail_mailbox_key(account_id, value)
+    """寻址规则统一走 provider 层：账号寻址的来源（CYMail / iCloud 引擎）编进 key。"""
+    try:
+        return mailbox_key_for(connection.kind, connection.config_json or {}, address)
+    except AccountIdRequired as exc:
+        raise HTTPException(status_code=422, detail=exc.code) from None
 
 
 def _summary_payload(summary: MessageSummary, kind: str) -> dict:

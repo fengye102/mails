@@ -1,6 +1,9 @@
+from datetime import UTC
+
 import pytest
-from mails_api.models import Base
 from sqlalchemy import create_engine, inspect
+
+from mails_api.models import Base
 
 
 def test_initial_schema_has_six_tables():
@@ -60,8 +63,9 @@ def test_schema_has_required_fields_and_constraints():
 
 def test_settings_require_environment_values(monkeypatch):
     import pytest
-    from mails_api.settings import Settings
     from pydantic import ValidationError
+
+    from mails_api.settings import Settings
 
     for key in ("DATABASE_URL", "ENCRYPTION_KEY", "PUBLIC_ORIGIN", "UPSTREAM_ORIGINS"):
         monkeypatch.delenv(f"MAILS_{key}", raising=False)
@@ -81,6 +85,7 @@ def test_settings_require_environment_values(monkeypatch):
 @pytest.mark.asyncio
 async def test_health_and_injected_state_without_implicit_schema(engine):
     import httpx
+
     from mails_api.app import create_app
     from mails_api.settings import Settings
 
@@ -108,15 +113,16 @@ async def test_health_and_injected_state_without_implicit_schema(engine):
 
 
 def test_get_db_uses_request_engine_and_rolls_back_uncommitted_work(engine):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from fastapi import Request
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session as DatabaseSession
+
     from mails_api.app import create_app
     from mails_api.db import get_db
     from mails_api.models import User
     from mails_api.settings import Settings
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session as DatabaseSession
 
     Base.metadata.create_all(engine)
     app = create_app(
@@ -137,7 +143,7 @@ def test_get_db_uses_request_engine_and_rolls_back_uncommitted_work(engine):
         User(
             username="uncommitted",
             password_hash="hash",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db.flush()
@@ -149,8 +155,9 @@ def test_get_db_uses_request_engine_and_rolls_back_uncommitted_work(engine):
 def test_migration_upgrade_matches_models_and_downgrade(tmp_path):
     from pathlib import Path
 
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     api_dir = Path(__file__).resolve().parents[1]
     config = Config(str(api_dir / "alembic.ini"))

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from mails_api.models import Mailbox, Message, ProviderConnection
@@ -6,8 +6,9 @@ from mails_api.services.identity import identity_statuses
 
 
 def test_identity_status_marks_duplicate_valid_rfc_ids_without_merging(engine):
-    from mails_api.models import Base
     from sqlalchemy.orm import Session
+
+    from mails_api.models import Base
 
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -39,7 +40,7 @@ def test_identity_status_marks_duplicate_valid_rfc_ids_without_merging(engine):
                 recipient="box@example.com",
                 subject="one",
                 snippet="one",
-                received_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                received_at=datetime(2026, 1, 1, tzinfo=UTC),
                 body_text="one",
             ),
             Message(
@@ -51,7 +52,7 @@ def test_identity_status_marks_duplicate_valid_rfc_ids_without_merging(engine):
                 recipient="box@example.com",
                 subject="one",
                 snippet="one",
-                received_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                received_at=datetime(2026, 1, 1, tzinfo=UTC),
                 body_text="one",
             ),
             Message(
@@ -63,7 +64,7 @@ def test_identity_status_marks_duplicate_valid_rfc_ids_without_merging(engine):
                 recipient="box@example.com",
                 subject="two",
                 snippet="two",
-                received_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                received_at=datetime(2026, 1, 1, tzinfo=UTC),
                 body_text="two",
             ),
         ]

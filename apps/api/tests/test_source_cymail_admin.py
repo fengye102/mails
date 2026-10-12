@@ -12,6 +12,8 @@ import json
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from mails_api.app import create_app
 from mails_api.models import Base, ProviderConnection, User
 from mails_api.routes import source_cymail
@@ -20,7 +22,6 @@ from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
 from mails_api.sources_admin.base import SourceAdminError, SourceItem
 from mails_api.sources_admin.cymail import CYMailSourceAdmin, build
-from sqlalchemy.orm import Session
 
 BASE_URL = "https://cy.example"
 KEY = bytes(range(32))

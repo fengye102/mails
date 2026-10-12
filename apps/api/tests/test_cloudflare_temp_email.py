@@ -1,7 +1,8 @@
-from datetime import timezone
+from datetime import UTC
 
 import httpx
 import pytest
+
 from mails_api.providers.base import ProviderError
 from mails_api.providers.cloudflare_temp_email import CloudflareTempEmailAdapter
 
@@ -63,7 +64,7 @@ async def test_list_parses_raw_mime_and_uses_admin_auth():
     assert result.summaries[0].sender == "sender@example.com"
     assert result.summaries[0].subject == "Verification"
     assert result.summaries[0].snippet == "Your code is 123456"
-    assert result.summaries[0].received_at.tzinfo == timezone.utc
+    assert result.summaries[0].received_at.tzinfo == UTC
 
 
 @pytest.mark.asyncio

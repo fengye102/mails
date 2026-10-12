@@ -54,9 +54,47 @@ class TrustSessionRequired(AliasError):
         super().__init__("TRUST_SESSION_REQUIRED", message)
 
 
+def root_alias_error(error: BaseException) -> BaseException:
+    """沿异常链找最具体的分类（Python 版 Go 的 `errors.Is`）。
+
+    上游客户端重试失败后会把原始错误包一层再抛（`raise ... from last_error`），
+    真正有用的分类挂在 `__cause__` 上。只看最外层会把「限速」「容量满」当成普通失败，
+    于是退避和自动停都不会触发——会一直对着已经满的账号重试到被上游封禁。
+
+    优先级：容量满 > 限速 > 信任会话失效 > 其他 AliasError > 原样返回。
+    """
+    ranked: list[tuple[int, BaseException]] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, AliasLimitReached):
+            ranked.append((3, current))
+        elif isinstance(current, AliasRateLimited):
+            ranked.append((2, current))
+        elif isinstance(current, TrustSessionRequired):
+            ranked.append((1, current))
+        elif isinstance(current, AliasError):
+            ranked.append((0, current))
+        current = current.__cause__ or current.__context__
+    if not ranked:
+        return error
+    return max(ranked, key=lambda item: item[0])[1]
+
+
+def is_alias_limit_reached(error: BaseException) -> bool:
+    return isinstance(root_alias_error(error), AliasLimitReached)
+
+
+def is_alias_rate_limited(error: BaseException) -> bool:
+    return isinstance(root_alias_error(error), AliasRateLimited)
+
+
 def alias_retry_after(error: BaseException) -> timedelta:
-    if isinstance(error, AliasRateLimited) and error.retry_after.total_seconds() > 0:
-        return error.retry_after
+    """取限速建议时长；同样要穿透包装层，否则拿到 0 会退避成「立刻重试」。"""
+    root = root_alias_error(error)
+    if isinstance(root, AliasRateLimited) and root.retry_after.total_seconds() > 0:
+        return root.retry_after
     return timedelta(0)
 
 

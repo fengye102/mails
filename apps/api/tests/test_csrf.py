@@ -2,9 +2,10 @@ from typing import Annotated
 
 import pytest
 from fastapi import Depends
-from mails_api.models import Session, User
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
+
+from mails_api.models import Session, User
 
 
 def login(client, headers):

@@ -7,6 +7,7 @@
 import os
 
 import pytest
+
 from icloud_api.srp.client import new_srp_client
 from icloud_api.srp.params import (
     calculate_k,

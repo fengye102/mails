@@ -2,14 +2,15 @@
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
-from mails_api.db import get_db
-from mails_api.models import Session, User, utc_now
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
+
+from mails_api.db import get_db
+from mails_api.models import Session, User, utc_now
 
 COOKIE_NAME = "mails_session"
 
@@ -31,7 +32,7 @@ def create_session(db: DbSession, user: User, now: datetime) -> tuple[str, Sessi
 
 def _as_utc(value: datetime) -> datetime:
     # SQLite returns naive datetimes; PostgreSQL preserves the UTC offset.
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 def get_current_session(

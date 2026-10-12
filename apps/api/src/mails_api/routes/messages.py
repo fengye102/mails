@@ -1,19 +1,20 @@
 """Private local message search and JSON-only plain text detail."""
 
-from datetime import timezone
+from datetime import UTC
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import AwareDatetime
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import load_only
+
 from mails_api.db import get_db
 from mails_api.models import Mailbox, Message, ProviderConnection
 from mails_api.security.csrf import require_member
 from mails_api.services.extract import extract_link
 from mails_api.services.identity import identity_statuses
-from pydantic import AwareDatetime
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session as DbSession
-from sqlalchemy.orm import load_only
 
 router = APIRouter(
     prefix="/api/v1/messages", dependencies=[Depends(require_member)]
@@ -30,7 +31,7 @@ def message_payload(
     # SQLite omits timezone information; persisted dates are always UTC.
     received_at = message.received_at
     if received_at.tzinfo is None:
-        received_at = received_at.replace(tzinfo=timezone.utc)
+        received_at = received_at.replace(tzinfo=UTC)
     return {
         "id": str(message.id),
         "mailbox_id": str(message.mailbox_id),
@@ -40,7 +41,7 @@ def message_payload(
         "recipient": message.recipient,
         "subject": message.subject,
         "snippet": message.snippet,
-        "received_at": received_at.astimezone(timezone.utc).isoformat(),
+        "received_at": received_at.astimezone(UTC).isoformat(),
         "verification_code": message.verification_code,
     }
 
@@ -86,11 +87,11 @@ def list_messages(
         )
     if from_time is not None:
         statement = statement.where(
-            Message.received_at >= from_time.astimezone(timezone.utc)
+            Message.received_at >= from_time.astimezone(UTC)
         )
     if to_time is not None:
         statement = statement.where(
-            Message.received_at < to_time.astimezone(timezone.utc)
+            Message.received_at < to_time.astimezone(UTC)
         )
     total = db.scalar(
         statement.with_only_columns(func.count(), maintain_column_froms=True)

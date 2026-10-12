@@ -9,6 +9,9 @@ from uuid import UUID
 
 from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.db import get_db
 from mails_api.models import ProviderConnection
 from mails_api.routes.connections import (
@@ -20,8 +23,6 @@ from mails_api.security.crypto import decrypt_secret
 from mails_api.security.csrf import require_csrf, require_member, require_owner
 from mails_api.sources_admin import admin_for
 from mails_api.sources_admin.base import SourceAdminError
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.orm import Session as DbSession
 
 router = APIRouter(prefix="/api/v1/sources/cymail", dependencies=[Depends(require_member)])
 

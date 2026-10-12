@@ -4,6 +4,10 @@ import base64
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from icloud_api.accounts import account_cookies, resolve_key
 from icloud_api.browser_auth import (
     AUTHORIZATION_CODE_PREFIX,
@@ -16,9 +20,6 @@ from icloud_api.browser_auth import (
 )
 from icloud_api.hme_client import AccountInfo
 from icloud_api.models import ICloudAccount, ICloudBrowserAuthSession
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 ADMIN = "/icloud-api/admin"
 PUBLIC_COMPLETE = "/icloud-api/public/browser-auth/complete"
@@ -230,6 +231,7 @@ def test_complete_ignores_apple_account_bootstrap_support(client) -> None:
 
 def test_complete_enables_apple_account_when_bootstrapper_succeeds(settings, engine, validator) -> None:
     from fastapi.testclient import TestClient
+
     from icloud_api.app import create_app
 
     async def bootstrap(cookies: dict[str, str]) -> bool:
@@ -248,6 +250,7 @@ def test_complete_enables_apple_account_when_bootstrapper_succeeds(settings, eng
 
 def test_complete_survives_bootstrapper_failure(settings, engine, validator) -> None:
     from fastapi.testclient import TestClient
+
     from icloud_api.app import create_app
 
     async def bootstrap(cookies: dict[str, str]) -> bool:

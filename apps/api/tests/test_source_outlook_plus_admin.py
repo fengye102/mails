@@ -26,6 +26,9 @@ import json
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.app import create_app
 from mails_api.models import Base, ProviderConnection, User
 from mails_api.routes.source_outlook_plus import router as source_router
@@ -34,8 +37,6 @@ from mails_api.security.passwords import hash_password
 from mails_api.settings import Settings
 from mails_api.sources_admin import outlook_plus
 from mails_api.sources_admin.base import SOURCE_ERROR_CODES, SourceAdminError
-from sqlalchemy import select
-from sqlalchemy.orm import Session as DbSession
 
 BASE_URL = "https://oep.example"
 PASSWORD = "login-password"

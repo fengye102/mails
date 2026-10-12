@@ -5,9 +5,10 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy.orm import object_session
+
 from mails_api.models import Session, User
 from mails_api.security.sessions import get_current_session
-from sqlalchemy.orm import object_session
 
 
 def require_csrf(

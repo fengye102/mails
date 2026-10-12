@@ -1,15 +1,16 @@
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.app import create_app
 from mails_api.models import Base, Session, User
 from mails_api.security.passwords import hash_password, verify_password
 from mails_api.security.sessions import COOKIE_NAME, create_session
 from mails_api.settings import Settings
-from sqlalchemy import select
-from sqlalchemy.orm import Session as DbSession
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def test_logout_revokes_server_session(client, engine):
 
 
 def test_session_token_is_hashed_and_csrf_independent(engine, owner):
-    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 9, tzinfo=UTC)
     with DbSession(engine) as db:
         raw, session = create_session(db, db.get(User, owner), now)
         assert session.token_hash == hashlib.sha256(raw.encode()).hexdigest()
@@ -101,7 +102,7 @@ def test_missing_and_unknown_cookie_are_rejected(client):
 )
 def test_expired_session_is_rejected(client, engine, monkeypatch, field, age):
     assert login(client).status_code == 200
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     monkeypatch.setattr("mails_api.security.sessions.utc_now", lambda: now)
     with DbSession(engine) as db:
         setattr(db.scalar(select(Session)), field, now - age)
@@ -111,12 +112,12 @@ def test_expired_session_is_rejected(client, engine, monkeypatch, field, age):
 
 def test_active_session_updates_last_seen(client, engine, monkeypatch):
     assert login(client).status_code == 200
-    now = datetime.now(timezone.utc) + timedelta(minutes=10)
+    now = datetime.now(UTC) + timedelta(minutes=10)
     monkeypatch.setattr("mails_api.security.sessions.utc_now", lambda: now)
     assert client.get("/api/v1/session").status_code == 200
     with DbSession(engine) as db:
         assert (
-            db.scalar(select(Session)).last_seen_at.replace(tzinfo=timezone.utc) == now
+            db.scalar(select(Session)).last_seen_at.replace(tzinfo=UTC) == now
         )
 
 

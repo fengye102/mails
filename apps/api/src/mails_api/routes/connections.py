@@ -1,27 +1,33 @@
 """Owner-only provider configuration; credentials never enter responses."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from mails_api.db import get_db
-from mails_api.models import ProviderConnection, utc_now
-from mails_api.providers.base import MailProvider, ProviderError
-from mails_api.providers.factory import PROVIDER_KINDS, provider_for
-from mails_api.security.crypto import decode_key, encrypt_secret
-from mails_api.security.csrf import require_csrf, require_member, require_owner
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
+
+from mails_api.db import get_db
+from mails_api.models import ProviderConnection, utc_now
+from mails_api.providers.base import MailProvider, ProviderError
+from mails_api.providers.factory import (
+    ACCOUNT_SCOPED_KINDS,
+    PROVIDER_KINDS,
+    account_id_required_code,
+    provider_for,
+)
+from mails_api.security.crypto import decode_key, encrypt_secret
+from mails_api.security.csrf import require_csrf, require_member, require_owner
 
 router = APIRouter(prefix="/api/v1/connections", dependencies=[Depends(require_member)])
 
 
 class ConnectionInput(BaseModel):
-    kind: Literal["outlook_plus", "cloudflare_temp_email", "cymail"]
+    kind: Literal["outlook_plus", "cloudflare_temp_email", "cymail", "icloud_hme"]
     name: str = Field(min_length=1, max_length=256)
     base_url: str = Field(min_length=1, max_length=2048)
     api_key: SecretStr = Field(min_length=1, max_length=8192)
@@ -36,15 +42,19 @@ class ConnectionInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_provider_config(self):
-        if self.kind == "cymail":
+        # 账号寻址的来源（CYMail / iCloud 引擎）必须带 account_id；其余来源不接受配置。
+        # 斜杠与反斜杠一并挡住：icloud_hme 会把账号 id 拼进 URL 路径。
+        if self.kind in ACCOUNT_SCOPED_KINDS:
             account_id = self.config.get("account_id")
             if (
                 not isinstance(account_id, str)
                 or not account_id.strip()
                 or len(account_id) > 256
                 or any(ord(char) < 32 for char in account_id)
+                or "/" in account_id
+                or "\\" in account_id
             ):
-                raise ValueError("CYMAIL_ACCOUNT_ID_REQUIRED")
+                raise ValueError(account_id_required_code(self.kind))
             self.config = {"account_id": account_id.strip()}
         elif self.config:
             raise ValueError("PROVIDER_CONFIG_UNSUPPORTED")
@@ -130,8 +140,8 @@ def checked_time(value: datetime | None) -> str | None:
     if value is None:
         return None
     return (
-        value.replace(tzinfo=value.tzinfo or timezone.utc)
-        .astimezone(timezone.utc)
+        value.replace(tzinfo=value.tzinfo or UTC)
+        .astimezone(UTC)
         .isoformat()
         .replace("+00:00", "Z")
     )
@@ -139,7 +149,7 @@ def checked_time(value: datetime | None) -> str | None:
 
 def connection_payload(connection: ProviderConnection) -> dict:
     config = {}
-    if connection.kind == "cymail":
+    if connection.kind in ACCOUNT_SCOPED_KINDS:
         account_id = (connection.config_json or {}).get("account_id")
         if isinstance(account_id, str):
             config = {"account_id": account_id}

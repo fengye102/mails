@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
+
 from mails_api.providers.base import ProviderError
 from mails_api.providers.outlook_plus import OutlookPlusAdapter
 
@@ -58,7 +59,7 @@ async def test_paging_uses_page_size_not_has_more(count, skips):
     assert result.issues == []
     if result.summaries:
         assert result.summaries[0].received_at == datetime.fromtimestamp(
-            1760000000, timezone.utc
+            1760000000, UTC
         )
         assert result.summaries[0].sender == "sender@example.com"
 

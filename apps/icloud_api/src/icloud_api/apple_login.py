@@ -258,7 +258,7 @@ def _compressed_fingerprint(now: datetime) -> str:
     )
 
 
-def _fd_client_info(user_agent: str) -> str:
+def fd_client_info(user_agent: str) -> str:
     info = {
         "U": user_agent or APPLE_ACCOUNT_MANAGE_USER_AGENT,
         "L": APPLE_ACCOUNT_MANAGE_LANGUAGE,
@@ -293,7 +293,7 @@ def _srp_headers(session: _Session) -> dict[str, str]:
         "X-Apple-OAuth-State": frame_tag,
         "X-Apple-Frame-Id": frame_tag,
         "X-Requested-With": "XMLHttpRequest",
-        "X-Apple-I-FD-Client-Info": _fd_client_info(session.user_agent),
+        "X-Apple-I-FD-Client-Info": fd_client_info(session.user_agent),
         "X-Apple-Domain-Id": "11",
         "X-Apple-Privacy-Consent": "true",
         "X-Apple-Privacy-Consent-Accepted": "true",
@@ -336,7 +336,7 @@ def _portal_headers(session: _Session, accept: str, json_content: bool) -> dict[
         headers["Content-Type"] = "application/json"
         headers["X-Apple-I-Request-Context"] = APPLE_ACCOUNT_MANAGE_REQUEST_CTX
         headers["X-Apple-I-TimeZone"] = APPLE_ACCOUNT_MANAGE_TIME_ZONE
-        headers["X-Apple-I-FD-Client-Info"] = _fd_client_info(session.user_agent)
+        headers["X-Apple-I-FD-Client-Info"] = fd_client_info(session.user_agent)
     return headers
 
 
@@ -354,7 +354,7 @@ def _manage_headers(session: _Session, with_scnt: bool) -> dict[str, str]:
         "Sec-CH-UA-Platform": APPLE_ACCOUNT_MANAGE_PLATFORM,
         "Sec-CH-UA": '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
         "Sec-CH-UA-Mobile": "?0",
-        "X-Apple-I-FD-Client-Info": _fd_client_info(session.user_agent),
+        "X-Apple-I-FD-Client-Info": fd_client_info(session.user_agent),
         "X-Apple-I-Request-Context": APPLE_ACCOUNT_MANAGE_REQUEST_CTX,
         "X-Apple-I-TimeZone": APPLE_ACCOUNT_MANAGE_TIME_ZONE,
     }

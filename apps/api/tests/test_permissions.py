@@ -4,10 +4,11 @@ import base64
 from pathlib import Path
 
 import pytest
-from mails_api.models import Base, User
-from mails_api.security.passwords import hash_password
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from mails_api.models import Base, User
+from mails_api.security.passwords import hash_password
 
 
 @pytest.mark.parametrize("path", [
@@ -95,8 +96,9 @@ def test_cli_creates_member_only_when_owner_exists(tmp_path, monkeypatch):
 
 
 def test_cli_rejects_member_creation_without_owner(tmp_path, monkeypatch, capsys):
-    from mails_api.cli import main
     from sqlalchemy import create_engine
+
+    from mails_api.cli import main
 
     url = _configure_db(monkeypatch, tmp_path / "no-owner.db")
     db_engine = create_engine(url)

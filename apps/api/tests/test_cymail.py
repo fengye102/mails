@@ -1,7 +1,8 @@
-from datetime import timezone
+from datetime import UTC
 
 import httpx
 import pytest
+
 from mails_api.providers.base import ProviderError
 from mails_api.providers.cymail import CYMailAdapter, mailbox_key
 
@@ -60,7 +61,7 @@ async def test_list_normalizes_cymail_inbox_and_preserves_body():
     assert result.summaries[0].provider_id == "42"
     assert result.summaries[0].method == "imap"
     assert result.summaries[0].provider_message_key == "imap:42"
-    assert result.summaries[0].received_at.tzinfo == timezone.utc
+    assert result.summaries[0].received_at.tzinfo == UTC
 
     detail = await adapter.get_message(BASE_URL, KEY, MAILBOX_KEY, result.summaries[0])
     assert detail.body_text == "Your code is 123456"

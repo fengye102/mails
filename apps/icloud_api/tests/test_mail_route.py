@@ -6,6 +6,7 @@
 
 import pytest
 from fake_imap import FakeImapServer
+
 from icloud_api.models import ICloudAccount
 
 
@@ -13,6 +14,7 @@ from icloud_api.models import ICloudAccount
 def client_with_imap(settings, engine, validator, fake_imap_factory):
     """带假 IMAP 工厂的 client 工厂：`client = client_with_imap(server)`。"""
     from fastapi.testclient import TestClient
+
     from icloud_api.app import create_app
 
     def make(server: FakeImapServer):

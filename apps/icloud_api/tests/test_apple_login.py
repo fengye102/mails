@@ -12,6 +12,7 @@ import json
 
 import httpx
 import pytest
+
 from icloud_api.apple_login import srp_login
 
 MOCK_MANAGE_SCNT = "scnt-final"

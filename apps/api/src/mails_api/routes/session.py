@@ -4,14 +4,15 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session as DbSession
+
 from mails_api.db import get_db
 from mails_api.models import Session, User, utc_now
 from mails_api.security.csrf import require_csrf, require_login_origin
 from mails_api.security.passwords import verify_password
 from mails_api.security.sessions import COOKIE_NAME, create_session, get_current_session
-from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.orm import Session as DbSession
 
 router = APIRouter(prefix="/api/v1")
 

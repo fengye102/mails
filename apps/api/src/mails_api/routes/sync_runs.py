@@ -4,6 +4,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from mails_api.db import get_db
 from mails_api.models import Mailbox, ProviderConnection, SyncRun, utc_now
 from mails_api.routes.connections import (
@@ -14,8 +17,6 @@ from mails_api.routes.connections import (
 )
 from mails_api.security.csrf import require_csrf, require_member, require_owner
 from mails_api.services.sync import sync_mailbox
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_member)])
 

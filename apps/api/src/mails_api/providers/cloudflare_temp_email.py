@@ -4,7 +4,7 @@ import asyncio
 import base64
 import binascii
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.message import Message
 from email.parser import Parser
@@ -12,6 +12,7 @@ from email.utils import getaddresses
 from urllib.parse import quote
 
 import httpx
+
 from mails_api.providers.base import (
     MessageListIssue,
     MessageListResult,
@@ -46,8 +47,8 @@ def _parse_datetime(value: object) -> datetime:
         raise _contract_error() from None
     # D1's `datetime('now')` values are UTC but omit an offset.
     if result.tzinfo is None:
-        result = result.replace(tzinfo=timezone.utc)
-    return result.astimezone(timezone.utc)
+        result = result.replace(tzinfo=UTC)
+    return result.astimezone(UTC)
 
 
 def _rfc_message_id(message: Message) -> str | None:
