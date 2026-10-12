@@ -4,13 +4,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from delivery_api.auth import require_operator
 from delivery_api.credentials import MAX_CREDENTIAL_FAILURES, issue_credential
 from delivery_api.db import get_db
-from delivery_api.messages import count_messages, last_ingested_at, list_messages
+from delivery_api.icloud_engine import EngineError, ICloudEngineClient
+from delivery_api.messages import (
+    count_messages,
+    ingest_messages,
+    last_ingested_at,
+    list_messages,
+)
 from delivery_api.models import (
     DeliveryAllocation,
     DeliveryAuditEvent,
@@ -271,9 +277,72 @@ def verify_pickup(
     }
 
 
+# 取件刷新一次拉多少信：够看到刚到的验证码，又不至于把收件箱整箱拖进来。
+PICKUP_REFRESH_LIMIT = 50
+PICKUP_REFRESH_DAYS = 7
+
+
+def _claim_refresh(db: Session, mailbox: InventoryMailbox, now: datetime, interval: int) -> bool:
+    """抢占本次刷新权（条件 UPDATE 做 CAS）。
+
+    间隔内同一邮箱只有一个请求真去拉上游，其余请求直接读本地归档。
+    先提交抢占、再拉上游：拉失败也保留时间戳——上游故障时不该被每个取件请求反复捶。
+    """
+    claimed = db.execute(
+        update(InventoryMailbox)
+        .where(
+            InventoryMailbox.id == mailbox.id,
+            or_(
+                InventoryMailbox.last_refreshed_at.is_(None),
+                InventoryMailbox.last_refreshed_at <= now - timedelta(seconds=interval),
+            ),
+        )
+        .values(last_refreshed_at=now)
+        # 关掉 ORM 的内存同步：它会把 WHERE 条件在本会话对象上再求值一遍，
+        # 而 SQLite 读回的时间戳是 naive、截止时间是 tz-aware，比较直接抛 TypeError。
+        # 判定真相在数据库那一侧，这里不需要也不该做内存推断。
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return claimed.rowcount == 1
+
+
+def _refresh_from_engine(request: Request, db: Session, mailbox: InventoryMailbox) -> dict:
+    """取件读时按邮箱节流刷新一次上游。
+
+    刷新失败**不**让取件失败：归档里的邮件照给，状态如实回报。
+    取件人是来拿邮件的，不是来替我们测上游的。
+    """
+    settings = request.app.state.settings
+    interval = settings.pickup_refresh_min_interval_seconds
+    if interval <= 0:
+        return {"status": "disabled"}
+    if mailbox.source_label != (settings.icloud_engine_source_label or "").strip():
+        # 手工登记的库存没有上游可拉：如实说明，不假装刷新过。
+        return {"status": "not-applicable"}
+    base_url = (settings.icloud_engine_url or "").strip()
+    token = settings.icloud_engine_token or ""
+    account_id = (settings.icloud_engine_account_id or "").strip()
+    if not base_url or not token or not account_id:
+        return {"status": "not-configured"}
+    now = utc_now()
+    if not _claim_refresh(db, mailbox, now, interval):
+        return {"status": "throttled", "min_interval_seconds": interval}
+    engine = ICloudEngineClient(request.app.state.icloud_engine_client, base_url, token)
+    try:
+        items = engine.list_mail(
+            account_id, mailbox.address, limit=PICKUP_REFRESH_LIMIT, days=PICKUP_REFRESH_DAYS
+        )
+    except EngineError as error:
+        return {"status": "unavailable", "code": error.code}
+    outcome = ingest_messages(db, mailbox.id, items)
+    return {"status": "refreshed", **outcome.as_dict()}
+
+
 @router.get("/{allocation_id}/mailbox")
 def read_mailbox(
     allocation_id: str,
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
@@ -303,6 +372,8 @@ def read_mailbox(
         raise HTTPException(404, {"code": "DELIVERY_MAILBOX_NOT_FOUND"})
     if mailbox.status != "allocated":
         raise HTTPException(403, {"code": "DELIVERY_PICKUP_SCOPE_INVALID"})
+    # 取件读时按邮箱节流刷新一次上游：失败不影响本次取件，状态随 sync 如实回报。
+    refresh = _refresh_from_engine(request, db, mailbox)
     rows = list_messages(db, mailbox.id, limit)
     ingested_at = last_ingested_at(db, mailbox.id)
     messages = [
@@ -320,10 +391,12 @@ def read_mailbox(
     ]
     return {
         "address": mailbox.address,
-        # C 不做上游拉信（上游引擎属批次 7 范围）：只如实回报入库状态，不伪装成实时同步。
+        # 上游刷新状态如实回报（refreshed/throttled/unavailable/not-applicable/disabled），
+        # 取件人据此判断「看到的就是最新的」还是「上游这会儿没刷上」。
         "sync": {
             "messages_total": count_messages(db, mailbox.id),
             "last_ingested_at": ingested_at.isoformat() if ingested_at else None,
+            "upstream": refresh,
         },
         "messages": messages,
     }

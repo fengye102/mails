@@ -2,15 +2,19 @@ from datetime import datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from delivery_api import pool
 from delivery_api.auth import require_operator
 from delivery_api.cleanup import cleanup_expired_allocations
 from delivery_api.credentials import issue_credential
 from delivery_api.db import get_db
+from delivery_api.icloud_engine import EngineError, ICloudEngineClient
+from delivery_api.inventory_sync import DEFAULT_SOURCE_LABEL, apply_alias_snapshot
 from delivery_api.messages import (
     count_messages,
     ingest_messages,
@@ -89,6 +93,11 @@ def allocate_mailbox(
 
     if row.status != "available":
         raise HTTPException(409, {"code": "DELIVERY_MAILBOX_NOT_AVAILABLE"})
+
+    # 池里正被注册机租用的邮箱不许再发给取件订单：两条链路同时占用同一个地址会串号。
+    # 反向由池侧把关（池只发库存 status == available 且未被领用的邮箱），方向对称。
+    if row.pool_status == pool.POOL_CLAIMED:
+        raise HTTPException(409, {"code": "DELIVERY_MAILBOX_POOL_CLAIMED"})
 
     allocation = DeliveryAllocation(
         id=str(uuid4()),
@@ -213,6 +222,68 @@ def read_mailbox_messages(
             }
             for row in list_messages(db, mailbox.id, limit)
         ],
+    }
+
+
+class InventorySyncInput(BaseModel):
+    """同步参数；留空即用服务端配置（引擎地址、账号、来源标签都在环境变量里）。"""
+
+    account_id: str = Field(default="", max_length=256)
+    source_label: str = Field(default="", max_length=64)
+
+
+def get_engine_client(request: Request) -> httpx.Client:
+    """引擎 HTTP 客户端（app 上的一条连接池，同步与取件刷新共用）。"""
+    return request.app.state.icloud_engine_client
+
+
+@router.post("/sync", dependencies=[Depends(require_operator)])
+def sync_inventory(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    client: Annotated[httpx.Client, Depends(get_engine_client)],
+    payload: InventorySyncInput | None = None,
+):
+    """拉引擎的别名快照对齐库存（幂等、可重复执行）。
+
+    上游有 → 建/恢复为 available；上游停用 → inactive；上游已不存在 → missing（不删）；
+    上游已不存在但本地有有效分配 → 只计数不动行（设计规格不变量 6）。
+    """
+    settings = request.app.state.settings
+    base_url = (settings.icloud_engine_url or "").strip()
+    token = settings.icloud_engine_token or ""
+    account_id = (payload.account_id if payload else "").strip() or (
+        settings.icloud_engine_account_id or ""
+    ).strip()
+    source_label = (payload.source_label if payload else "").strip() or (
+        settings.icloud_engine_source_label or DEFAULT_SOURCE_LABEL
+    ).strip()
+    if not base_url or not token or not account_id:
+        # 没配置就说没配置：不能让「同步成功 0 条」掩盖「其实根本没连上引擎」。
+        raise HTTPException(409, {"code": "DELIVERY_ENGINE_NOT_CONFIGURED"})
+
+    engine = ICloudEngineClient(client, base_url, token)
+    try:
+        snapshots = engine.list_aliases(account_id)
+    except EngineError as error:
+        raise HTTPException(502, {"code": error.code}) from None
+
+    outcome = apply_alias_snapshot(db, snapshots, source_label=source_label, now=utc_now())
+    db.add(
+        DeliveryAuditEvent(
+            event_type="inventory_synced",
+            details={
+                "account_id": account_id,
+                "source_label": source_label,
+                **outcome.as_dict(),
+            },
+        )
+    )
+    db.commit()
+    return {
+        "account_id": account_id,
+        "source_label": source_label,
+        **outcome.as_dict(),
     }
 
 

@@ -2,7 +2,7 @@
 name = "delivery-api"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn[standard]", "pydantic-settings", "sqlalchemy>=2,<3", "psycopg[binary]>=3,<4", "alembic", "cryptography"]
+dependencies = ["fastapi", "uvicorn[standard]", "pydantic-settings", "sqlalchemy>=2,<3", "psycopg[binary]>=3,<4", "alembic", "cryptography", "httpx"]
 
 [build-system]
 requires = ["hatchling"]

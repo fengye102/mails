@@ -1,12 +1,13 @@
 """C 测试共用夹具：内存 SQLite + 外键校验开启（与 PostgreSQL 行为一致）。"""
 
 import pytest
-from delivery_api.app import create_app
-from delivery_api.models import Base
-from delivery_api.settings import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.pool import StaticPool
+
+from delivery_api.app import create_app
+from delivery_api.models import Base
+from delivery_api.settings import Settings
 
 OPERATOR = "operator-test-token"
 

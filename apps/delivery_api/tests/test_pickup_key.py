@@ -3,10 +3,11 @@
 from urllib.parse import parse_qs
 
 import pytest
-from delivery_api.models import PickupAttempt, PickupCredential
-from delivery_api.security import hash_secret
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from delivery_api.models import PickupAttempt, PickupCredential
+from delivery_api.security import hash_secret
 
 OPERATOR = "operator-test-token"
 HEADERS = {"Authorization": f"Bearer {OPERATOR}"}
